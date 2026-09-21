@@ -1,0 +1,120 @@
+# Lars — Yakuza draft theme
+#
+# Hinokami Night structure re-skinned: near-black indigo ground, irezumi gold
+# primary, crimson accent. radius 0 (angular), compact density, cockpit layout
+# variant for the lars-home plugin sidebar rail.
+#
+# Install:  cp lars-yakuza.yaml  <HERMES_HOME>/dashboard-themes/lars-yakuza.yaml
+# Verify:   GET :9119/api/dashboard/themes → pick "Lars Yakuza" in the sidebar
+#           theme menu (bottom-left button). Iterate from there.
+#
+# Per-Div accents (used by the lars-home plugin, not this global theme):
+#   Div 7 dark blue #1e3a8a · Div 1 deep gold #b8860b · Div 3 pink #db2777
+#   Div 4 green #16a34a · Div 6 yellow #eab308
+
+name: lars-yakuza
+label: "Lars Yakuza"
+description: "Lars platform theme — near-black indigo, irezumi gold, crimson accent, angular panels."
+
+# ------- palette (3-layer) -------
+palette:
+  background: { hex: "#0a0d14", alpha: 1 }
+  midground: { hex: "#e8e4d8", alpha: 1 }
+  foreground: { hex: "#ffffff", alpha: 0 }
+  warmGlow: "rgba(200, 160, 60, 0.16)"
+  noiseOpacity: 0.12
+
+# ------- typography -------
+typography:
+  fontSans: '"Rajdhani", "Oswald", system-ui, "Segoe UI", sans-serif'
+  fontMono: '"JetBrains Mono", ui-monospace, "SF Mono", monospace'
+  fontDisplay: '"Rajdhani", "Oswald", system-ui, sans-serif'
+  fontUrl: "https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+  baseSize: "15px"
+  lineHeight: "1.55"
+  letterSpacing: "0.03em"
+
+# ------- layout -------
+layout:
+  radius: "0"
+  density: compact
+layoutVariant: cockpit
+
+# ------- assets -------
+assets:
+  bg: 'url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%201200%20680%22%3E%3Crect%20width=%221200%22%20680%22%20fill=%22#0a0d14%22/%3E%3CradialGradient%20id=%22g%22%20cx=%2225%25%22%20cy=%2210%25%22%3E%3Cstop%20stop-color=%22#c8a03c%22%20stop-opacity=%22.14%22/%3E%3Cstop%20offset=%221%22%20stop-color=%22#0a0d14%22%20stop-opacity=%220%22/%3E%3C/radialGradient%3E%3Crect%20width=%221200%22%20height=%22680%22%20fill=%22url(%23g)%22/%3E%3Cpath%20d=%22M0%20680%20L200%20560%20400%20620%20600%20500%20800%20560%201000%20440%201200%20500%22%20fill=%22none%22%20stroke=%22#b91c1c%22%20stroke-opacity=%22.25%22%20stroke-width=%223%22/%3E%3C/svg%3E")'
+  logo: ""
+  crest: ""
+  hero: ""
+
+# ------- component chrome -------
+componentStyles:
+  card:
+    background: "linear-gradient(180deg, color-mix(in srgb, var(--color-card) 94%, transparent), color-mix(in srgb, var(--color-card) 70%, transparent))"
+    border: "1px solid color-mix(in srgb, var(--color-primary) 30%, var(--color-border))"
+    boxShadow: "inset 0 0 0 1px color-mix(in srgb, white 4%, transparent), 0 14px 44px -40px var(--color-primary)"
+    clipPath: "polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px)"
+  sidebar:
+    background: "linear-gradient(180deg, color-mix(in srgb, var(--color-card) 92%, black), color-mix(in srgb, var(--color-background) 96%, black))"
+    border: "1px solid color-mix(in srgb, var(--color-primary) 18%, transparent)"
+  header:
+    background: "linear-gradient(90deg, color-mix(in srgb, var(--color-card) 92%, black), color-mix(in srgb, var(--color-primary) 8%, var(--color-card)))"
+    borderBottom: "1px solid color-mix(in srgb, var(--color-primary) 24%, transparent)"
+  tab:
+    clipPath: "polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%)"
+  backdrop:
+    backgroundSize: "cover"
+    backgroundPosition: "center"
+    fillerBlendMode: "screen"
+    fillerOpacity: "0.18"
+
+# ------- color overrides -------
+colorOverrides:
+  card: "#121722"
+  cardForeground: "#e8e4d8"
+  popover: "#161c2a"
+  popoverForeground: "#e8e4d8"
+  primary: "#c8a03c"            # irezumi gold
+  primaryForeground: "#0a0d14"
+  secondary: "#b91c1c"          # crimson
+  secondaryForeground: "#f5efe2"
+  muted: "#141a26"
+  mutedForeground: "#9a958a"
+  accent: "#1e3a8a"             # Div 7 dark blue
+  accentForeground: "#e8e4d8"
+  destructive: "#dc2626"
+  destructiveForeground: "#fff5f5"
+  success: "#16a34a"
+  warning: "#eab308"
+  border: "#2a3446"
+  input: "#2a3446"
+  ring: "#c8a03c"
+
+customCSS: |
+
+  :root { color-scheme: dark; }
+  body { text-rendering: optimizeLegibility; }
+  * { text-shadow: none !important; }
+  [class*="noise"] { opacity: var(--theme-noise-opacity, 0.12) !important; }
+
+  /* Angular chrome: square icon badges, clipped cards, gold nav highlight. */
+  nav a svg, aside button svg {
+    box-sizing: content-box;
+    padding: .34rem;
+    border: 1px solid color-mix(in srgb, var(--color-primary) 46%, transparent);
+    border-radius: 0;
+    background: color-mix(in srgb, var(--color-primary) 11%, transparent);
+    color: var(--color-primary);
+  }
+  nav a[aria-current="page"] svg {
+    color: var(--color-primary-foreground);
+    background: linear-gradient(135deg, var(--color-primary), color-mix(in srgb, var(--color-primary) 45%, #b91c1c));
+  }
+  nav a[aria-current="page"] {
+    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+    border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  }
+  nav a { margin: .12rem .6rem; border: 1px solid transparent; border-radius: 0; }
+  .bg-card, [class*="bg-card"] { backdrop-filter: blur(12px); }
+  button, input, textarea, select { min-height: 2.4rem; border-radius: 0; }
+  [role="button"]:hover, button:hover { transform: translateY(-1px); }
