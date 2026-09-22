@@ -1,0 +1,14 @@
+{
+  "name": "lars",
+  "label": "Lars",
+  "description": "Lars platform — Div 7 Master dashboard, Div pages, voice control",
+  "icon": "LayoutDashboard",
+  "version": "1.0.0",
+  "tab": {
+    "path": "/",
+    "override": "/",
+    "position": "start"
+  },
+  "slots": ["sidebar", "header-left", "footer-right"],
+  "entry": "dist/index.js"
+}
