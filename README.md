@@ -69,9 +69,10 @@ Per-Div accents (cards/pages, set per-division in the plugin config, not the glo
 ## 3e. Next steps
 
 1. Drop `themes/lars-yakuza.yaml` into `dashboard-themes/`, pick it in the theme menu, iterate palette/typography against the live board
-2. Fork `strike-freedom-cockpit/` → `lars-home/` plugin: home page = 5 Div cards (kanban grid), per-Div tabs, mic button; data via `plugin_api.py` backend routes (kanban state, division summaries)
-3. Corner mic module using Hermes' **native** voice
-4. Optional later: tunnel :9119 for phone/second-machine access (dashboard auth gate stays on)
+2. **Plugin installed:** `plugins/lars/` (forked from `strike-freedom-cockpit`) — replaces home page (`tab.override: "/"`), injects sidebar/header/footer slots. Source in repo, symlinked to `~/.hermes/plugins/lars/` for live editing. Identity renamed: `strike-freedom-cockpit` → `lars`, `hermes agent` → `Lars`.
+3. Build Div 7 Master page: 5 Div cards (kanban grid), per-Div tabs, mic button; data via `plugin_api.py` backend routes
+4. Corner mic module using Hermes' **native** voice
+5. Optional later: tunnel :9119 for phone/second-machine access (dashboard auth gate stays on)
 
 ## 4. Evaluated surfaces (superseded ideas — why not)
 
