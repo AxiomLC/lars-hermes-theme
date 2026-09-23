@@ -50,6 +50,8 @@ Documentation + theme assets for styling the **Lars** platform on [Hermes Agent]
    - Div 7 page shows a **custom voice/Mic module (Jarvis-styled), lower right**, to chat with the **Lars profile/agent**; plus an **"Expand"** button.
    - **"Expand" navigates over to the actual desktop Session chat window** (full bells & whistles: folder tree, terminal, preview, browser, layout, etc.) — WITH the **native mic/voice button there also wired into the STT/TTS voice we use for the big mic**.
    - The Lars agent gets **tools/skills to open other pages/modules** from within chat.
+   - **Div 7 hot-mic ("hey Lars") mode:** when the Div 7 page loads, an optional **hot-word listener** waits for "hey Lars" — on trigger it enters **streaming hands-free mode** (no button press): listens to the user, responds, and **cuts itself off if it hears the user again (barge-in)**. A **toggle turns hot-mic mode off** (returns to press-the-mic). This runs **only on the Div 7 page**; the desktop Session chat's native voice stays standard (no hot-word).
+   - Voice reference for the mic: the desktop repo's `use-voice-*` hooks + `/api/audio/*` (transcribe / speak / voice-live) + jarvis voice behavior.
 5. **Create the other 6 agents/profiles**, one per division, named by their full Div title e.g. **"Public Div 6"**, "Lars Div 7", etc. Skill files come later; wiring chat→page navigation figured out later.
 6. **Style all desktop pages after `Itsme23476/jarvis-hermes-dashboard`** (saved locally in `Git-Repos/jarvis-hermes-dashboard`): its shadows/lighting, fonts, highlights (cyan `#40f3ff`, amber `#ffb648`, near-black `#02070c`, glow `0 0 26px rgba(64,243,255,.55)`), but our Lars layout.
 
