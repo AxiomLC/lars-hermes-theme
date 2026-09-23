@@ -2,7 +2,27 @@
 
 Documentation + theme assets for styling the **Lars** platform on [Hermes Agent](https://github.com/NousResearch/hermes-agent). Handover repo — everything a fresh machine needs to continue.
 
-**Status:** planning/eval complete. **Dashboard web UI verified working on the target machine** (2026-09-21, current main): `hermes dashboard` on :9119 serves the browser dashboard in a plain browser; Strike Freedom theme + cockpit plugin installed and enabled as the working proof. Next: fork into `lars.yaml` (Yakuza styling, see §7).
+**Status:** ⚠️ **DIRECTION PIVOT — 2026-09-23.** The official dashboard is **OUT as the UI base** (see §1a below). Jarvis_ai-type **standalone app** is now the direction. Prior dashboard verification (§2–§3) is historical reference only.
+
+---
+
+## 1a. DIRECTION — standalone jarvis_ai-type app (2026-09-23)
+
+**The official Hermes dashboard is rejected as the Lars UI base.** Reasons, verified on the live dashboard + source:
+
+- **Can't eliminate the core chrome.** The sidebar `<aside id="app-sidebar">` is rendered **unconditionally** in `web/src/App.tsx` (`position:fixed; z-50; width:256px`); `tab.override "/"` only swaps the route *content inside* the outlet, never the shell. No "hide chrome / fullscreen" hook in the SDK or `layoutVariant`.
+- **Sidebar minimize is not enough.** There IS a collapse (`hermes-sidebar-collapsed` localStorage key → `collapsed` → `isDesktopCollapsed`, hover `PanelLeftOpen/Close` button), but it only shrinks the rail — the shell stays. Rejected.
+- **jarvis_ai validates the pattern** (verified in source): a **standalone app** (own server + own full-page HUD) that **iframes Hermes pages into an overlay**. `openView(name,path){ viewerIframe.src = DASH_PROXY+path; }` → `#viewer` = `position:fixed; inset:0; z-index:40; 90%×90%`, with close + pop-out (`window.open`). That's the *only* way to get "nothing-Hermes full-width" — because it lives **outside** Hermes.
+
+**The Lars direction:**
+
+- **Lars UI = its own standalone app** (jarvis_ai-type), full-width, shows nothing-Hermes.
+- **Div pages (Div 1/3/4/6/7) are full-width self-hosted sub-pages** of the app, styled after the master Div 7 home page (specs/layout-master.md). **NOT iframes.**
+- **The only iframe** is when a **core Hermes menu item** is opened from the Settings→core Hermes menu — that alone opens the core page in an overlay (same-origin, so no proxy needed).
+- **Pages host API-calling boxes** — widgets that pull Hermes core APIs for live data/functions.
+- **Cost (explicit):** this is **a second localhost process** running alongside Hermes core (jarvis_ai runs its own FastAPI server). Two running processes, by design. This is the price of "nothing-Hermes" and is accepted.
+
+**Terminology lock:** "sub-page" = full-width self-hosted Div page in our app. "iframe" = ONLY for core-Hermes menu access. Do not conflate.
 
 ---
 
