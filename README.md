@@ -20,7 +20,9 @@ Documentation + theme assets for styling the **Lars** platform on [Hermes Agent]
 - **Div pages (Div 1/3/4/6/7) are full-width self-hosted sub-pages** of the app, styled after the master Div 7 home page (specs/layout-master.md). **NOT iframes.**
 - **The only iframe** is when a **core Hermes menu item** is opened from the Settings→core Hermes menu — that alone opens the core page in an overlay (same-origin, so no proxy needed).
 - **Pages host API-calling boxes** — widgets that pull Hermes core APIs for live data/functions.
-- **Cost (explicit):** this is **a second localhost process** running alongside Hermes core (jarvis_ai runs its own FastAPI server). Two running processes, by design. This is the price of "nothing-Hermes" and is accepted.
+**Cost (explicit):** this is **a second localhost process** running alongside Hermes core (jarvis_ai runs its own FastAPI server). Two running processes, by design. This is the price of "nothing-Hermes" and is accepted.
+
+**Server kind (verified in source, 2026-09-23):** `:9119` is **uvicorn hosting a FastAPI app** (`hermes_cli/web_server.py::app`), auto-launched by `Hermes_Dashboard.vbs` in Startup. **Lars = the same kind of server on its own port (`:9120`)** — a second uvicorn+FastAPI app, auto-launched by its own VBS in Startup (same pattern). Two uvicorn processes, both self-start at login. **No proxy needed:** CORS is already open to any localhost origin (`allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"`) and the auth gate is off on loopback — so the Lars app on `:9120` can call `:9119`'s `/api/*` straight from the browser. Only iframe = core Hermes page from Settings→core menu.
 
 **Terminology lock:** "sub-page" = full-width self-hosted Div page in our app. "iframe" = ONLY for core-Hermes menu access. Do not conflate.
 
