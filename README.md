@@ -2,7 +2,7 @@
 
 Documentation + theme assets for styling the **Lars** platform on [Hermes Agent](https://github.com/NousResearch/hermes-agent). Handover repo — everything a fresh machine needs to continue.
 
-**Status:** ⚠️ **DIRECTION PIVOT — 2026-09-23.** The official dashboard is **OUT as the UI base** (see §1a below). Jarvis_ai-type **standalone app** is now the direction. Prior dashboard verification (§2–§3) is historical reference only.
+**Status:** ⚠️ **LATEST — HANDOFF 2026-09-24: build Lars as DESKTOP SDK plugins** (see §1b below). The standalone-app direction (§1a) still stands as the second build; desktop-plugin is now the FIRST build (testing both). Up-to-date status: **build in the desktop app now**; browser-app build of the same schema to follow.
 
 ---
 
@@ -25,6 +25,41 @@ Documentation + theme assets for styling the **Lars** platform on [Hermes Agent]
 **Server kind (verified in source, 2026-09-23):** `:9119` is **uvicorn hosting a FastAPI app** (`hermes_cli/web_server.py::app`), auto-launched by `Hermes_Dashboard.vbs` in Startup. **Lars = the same kind of server on its own port (`:9120`)** — a second uvicorn+FastAPI app, auto-launched by its own VBS in Startup (same pattern). Two uvicorn processes, both self-start at login. **No proxy needed:** CORS is already open to any localhost origin (`allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"`) and the auth gate is off on loopback — so the Lars app on `:9120` can call `:9119`'s `/api/*` straight from the browser. Only iframe = core Hermes page from Settings→core menu.
 
 **Terminology lock:** "sub-page" = full-width self-hosted Div page in our app. "iframe" = ONLY for core-Hermes menu access. Do not conflate.
+
+---
+
+## 1b. HANDOFF — BUILD LARS AS DESKTOP SDK PLUGINS (2026-09-24)
+
+**Decision:** build the Lars UI as **desktop-app SDK plugins** first (testable now, reuses the 1.5 GB app we already run), then mirror the same schema as a browser-app build. This REPLACES "standalone app first."
+
+### Why this direction
+- Desktop SDK pages = **fully custom-styled** React (`ROUTES_AREA` page = inject own CSS, no sandbox): glows, radius:0, staggered Div boxes, per-Div hues — all achievable. The theme-only limits apply to core chrome, NOT to pages we render.
+- Desktop chrome is **one collapsible left sidebar** (no top bar / top-logo slot to fight).
+- Every machine must run the **same repo + same SDK plugins** so everything renders correctly everywhere (host + remotes). Remotes connect over a tunneled port; they are NOT browser-rendered.
+
+### Known limits (accepted, verified)
+- Core composer's chat/mic is core-owned — we do NOT retrofit it; our chat lives in our own pages.
+- Sidebar: SDK `SIDEBAR_NAV_AREA` ADDS items below Artifacts; cannot remove/reorder core items.
+- Cost: this IS the ~1.5 GB desktop app (live-measured hermes.exe tree). Browser app ~176 MB (live). On a 16 GB host this is the price of the desktop route; the browser build is the RAM-cheap mirror (§1a).
+
+### THE BUILD (checked steps)
+1. **Install the desktop SDK plugin** (door: `$HERMES_HOME/desktop-plugins/<id>/plugin.js` or `$HERMES_HOME/plugins/<id>/desktop/plugin.js`). Single ESM file, no build step, hot reload via ⌘K → Reload desktop plugins.
+2. **Add ONE menu item to the core desktop sidebar: "Lars"** (`SIDEBAR_NAV_AREA` + `PALETTE_AREA` command + `ROUTES_AREA` page). Clicking it opens the **Div 7 Lars custom page**.
+3. **Create 7 pages** matching the agreed layout (`specs/layout-master.md`), with one addition: **our custom pages' left menu is ALSO collapsible — not fully, but to a thin strip of just the number text "7" "1" "2" "3" "4" "5" "6"**, each in its **Div color code**. Persist the collapsed state (per-page or global).
+4. **CHANGE the 25%/full-width Chat module spec for the DESKTOP build** (override §3. Chat box in the layout spec for this build):
+   - Div 7 page shows a **custom voice/Mic module (Jarvis-styled), lower right**, to chat with the **Lars profile/agent**; plus an **"Expand"** button.
+   - **"Expand" navigates over to the actual desktop Session chat window** (full bells & whistles: folder tree, terminal, preview, browser, layout, etc.) — WITH the **native mic/voice button there also wired into the STT/TTS voice we use for the big mic**.
+   - The Lars agent gets **tools/skills to open other pages/modules** from within chat.
+5. **Create the other 6 agents/profiles**, one per division, named by their full Div title e.g. **"Public Div 6"**, "Lars Div 7", etc. Skill files come later; wiring chat→page navigation figured out later.
+6. **Style all desktop pages after `Itsme23476/jarvis-hermes-dashboard`** (saved locally in `Git-Repos/jarvis-hermes-dashboard`): its shadows/lighting, fonts, highlights (cyan `#40f3ff`, amber `#ffb648`, near-black `#02070c`, glow `0 0 26px rgba(64,243,255,.55)`), but our Lars layout.
+
+### Also to follow (second build)
+- **Similar build in the browser app** (the :9120 standalone / jarvis-type) — more details to come, but mostly following the same schema discussed here + §1a.
+
+### Open questions (parked, not blocked)
+- Exact voice wiring: big-mic → STT/TTS endpoints already exist (`/api/audio/transcribe`, `/api/audio/speak`, `/api/audio/voice-live/*`).
+- Agent→page navigation from chat (tool or slash commands) — later.
+- Skill files per Div agent — later.
 
 ---
 
