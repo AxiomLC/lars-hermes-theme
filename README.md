@@ -1,156 +1,219 @@
-# lars-hermes-theme
+# lars-hermes-theme (machine-2 branch)
 
 The **Lars** platform UI for [Hermes Agent](https://github.com/NousResearch/hermes-agent) — AxiomLC's
 master agent command center, split into **Divisions** (Div 7 Master "Lars", plus Comms / Clients /
 Records / Production / Debug / Public).
 
-**Status:** BUILDING. Current direction (2026-09-24): **Lars = desktop-app SDK plugins.** Build in the
-desktop app; mirror the same schema in a browser app later. Analysis/history of rejected paths lives
-in [`OLD-README.md`](OLD-README.md) — this README is the plan going forward.
+**This branch (`machine-2`)** is the development fork from the 2nd machine. The `main` branch lives on
+the primary machine. This branch contains the **desktop plugin SDK build** (primary) with the browser
+app documented as the deferred mirror.
 
 ---
 
-## 1. Direction: build Lars as desktop SDK plugins
+## Quick Install (fresh machine, default Hermes install)
 
-Lars is built as **desktop-app SDK plugins** (`@hermes/plugin-sdk`) against the real Hermes desktop app.
+### Prerequisites
+- Windows 10/11 (tested)
+- [Hermes Agent desktop app](https://github.com/NousResearch/hermes-agent) installed (v0.21.4+)
+- Python 3.11+ (Hermes bundles its own; used for gateway + plugin backends)
+- Git
 
-### Why
-- **Pages are fully custom.** A `ROUTES_AREA` page is your own React component with **injected CSS (no
-  sandbox)** — glows, radius:0 boxes, staggered Div layout, per-Div hues: all achievable. The theme-only
-  limits apply to core chrome, not to pages we render.
-- **Core chrome is one collapsible left sidebar.** No top bar / top-logo slot to fight.
-- **Voice is native.** Desktop ships a working mic; our big-mic / voice wiring rides Hermes' voice
-  endpoints (`/api/audio/transcribe`, `/api/audio/speak`, `/api/audio/voice-live/*`).
+### 1. Install Hermes (if not already)
+```powershell
+# Official installer or scoop/chocolatey
+scoop install hermes-agent
+# OR download hermes-setup.exe from GitHub releases
+```
 
-### Known limits (accepted)
-- **Core composer's chat + mic are core-owned** — we don't retrofit them; our chat/mic live in *our*
-  pages. The full desktop Session chat (folder tree, terminal, preview, browser, layout) is reached by
-  navigation, not embedded.
-- **Sidebar**: `SIDEBAR_NAV_AREA` *adds* items below Artifacts; we cannot remove/reorder core items.
-- **Every machine runs the same repo + same plugins** so pages render correctly everywhere (host +
-  remotes connect over a tunneled port; remotes are NOT browser-rendered).
-- **Cost**: this is the ~1.5 GB desktop app (live-measured). The browser build (~176 MB, live) is the
-  RAM-cheap mirror (see §6).
+### 2. Clone this repo
+```powershell
+git clone https://github.com/AxiomLC/lars-hermes-theme.git
+cd lars-hermes-theme
+git checkout machine-2
+```
 
-### SDK quick facts (verified)
-- Doors: `$HERMES_HOME/desktop-plugins/<id>/plugin.js` **or** `$HERMES_HOME/plugins/<id>/desktop/plugin.js`.
-- Single ESM file, no build step; hot reload via **⌘K → Reload desktop plugins**.
-- Imports: only `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`. Write UI with `jsx('div', …)`, NOT JSX.
-- Key areas: `ROUTES_AREA` (full pages), `SIDEBAR_NAV_AREA` (nav rows), `PALETTE_AREA` (⌘K commands),
-  `panes`, `statusBar.left/right`, `THEMES_AREA` (DesktopTheme), `TRANSCRIPT_DIRECTIVE_AREA`.
-- Navigation: `host.navigate('/my-page')`. Data: `host.request` (gateway JSON-RPC), `host.onEvent`.
-- Full human reference: `reference/desktop-plugins.md` in the `hermes-agent` skill, and
-  `hermes_cli` desktop-plugin docs.
+### 3. Install the desktop plugin (one-time)
+The desktop plugin lives in `desktop-plugins/lars/plugin.js`. Copy it to Hermes' plugin door:
 
----
+```powershell
+# Hermest home on Windows:
+$env:LOCALAPPDATA\hermes\desktop-plugins\lars\plugin.js
+```
 
-## 2. The build (ordered)
+**Copy command:**
+```powershell
+$src = ".\desktop-plugins\lars\plugin.js"
+$dst = "$env:LOCALAPPDATA\hermes\desktop-plugins\lars\plugin.js"
+New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
+Copy-Item $src $dst -Force
+```
 
-1. **Install the SDK plugin** (door above). Loads within seconds; hot reload on save.
-2. **One sidebar item: "Lars"** — `SIDEBAR_NAV_AREA` + `PALETTE_AREA` command + `ROUTES_AREA` page →
-   opens the **Div 7 (Lars) custom page**.
-3. **Create the 7 Div pages** per the layout in `specs/layout-master.md` (master Div 7 grid: 1 long top
-   box, then 4 / 3 / 2; per-Div hues). On OUR pages, the left Lars menu is **collapsible not fully, but
-   to a thin strip of just the number text** ("7" "1" "2" "3" "4" "5" "6"), each in its **Div color**.
-   Persist the collapsed state.
-4. **Div 7 chat/voice (see §3).**
-5. **Six Div agents**, one per division, named by full title — e.g. agent **"Public Div 6"**, "Lars Div 7",
-   etc. Skill files come later; chat→page navigation wiring figures out later.
-6. **Style all pages after `Itsme23476/jarvis-hermes-dashboard`** (local clone:
-   `Git-Repos/jarvis-hermes-dashboard`) — its shadow/lighting, fonts, highlights:
-   cyan `#40f3ff`, amber `#ffb648`, near-black `#02070c`, glow `0 0 26px rgba(64,243,255,.55)` — in our
-   Lars layout.
+### 4. Install the Python backend (for live CPU/RAM/Disk/Cron stats)
+The backend lives in `plugins/lars/dashboard/plugin_api.py` and is mounted by the gateway at
+`/api/plugins/lars/stats`. It requires the `lars` plugin to be **enabled in `config.yaml`**.
 
----
+**Copy command:**
+```powershell
+$srcDir = ".\plugins\lars\dashboard"
+$dstDir = "$env:LOCALAPPDATA\hermes\plugins\lars\dashboard"
+New-Item -ItemType Directory -Force -Path $dstDir | Out-Null
+Copy-Item "$srcDir\*" $dstDir -Force -Recurse
+```
 
-## 3. Div 7 chat / voice module
+**Enable in config.yaml (required for Python backend):**
+```powershell
+# Edit C:\Users\<you>\AppData\Local\hermes\config.yaml
+# Find plugins.enabled and ensure "lars" is listed:
+# plugins:
+#   enabled: ["lars", "strike-freedom-cockpit"]
+```
 
-- **Div 7 page** shows a **custom voice/Mic module (Jarvis-styled), lower right**, to chat with the
-  **Lars agent**, plus an **"Expand"** button.
-- **"Expand"** navigates to the real desktop **Session chat** (full bells & whistles: folder tree,
-  terminal, preview, browser, layout), with the **native mic/voice button there wired into the STT/TTS
-  we use for the big mic**.
-- **Div 7 hot-mic ("hey Lars")**: optional hot-word listener on page load → on "hey Lars," **streaming
-  hands-free mode** (no button): listens → responds **and cuts itself off if it hears the user again
-  (barge-in)**. A **toggle disables hot-mic** back to press-to-talk. Runs **only on Div 7**; desktop
-  Session chat stays standard voice (no hot-word).
-- Voice reference: desktop repo `use-voice-*` hooks + `/api/audio/*` + jarvis voice behavior.
+Or via CLI:
+```powershell
+hermes config set plugins.enabled '["lars", "strike-freedom-cockpit"]'
+```
 
----
+### 5. Restart Hermes (gateway) once
+The gateway imports `plugin_api.py` at startup. After step 4, **restart Hermes completely**
+(close app, kill any `gateway-service` processes, relaunch). After this, the Utilities rail
+will show live CPU/RAM/Disk/Uptime/Cron data on its 5s/15s polls.
 
-## 4. The Divisions (canonical roles)
-
-- **Div 7 Master "Lars"** (dark blue): coordinator + mic; consolidated Div stats; social posts/comments
-  out; **GI Gross Income** (weekly manual entry); truncated crucial comms; n8n flow stats; custom stocks;
-  browser panel on demand.
-- **Div 1 Comms** (deep gold): WhatsApp/FB/social DMs, filtered email, voicemails; Slack = master mobile
-  channel.
-- **Div 2 Clients** (not-specced) — placeholder "Coming Soon".
-- **Div 3 Records** (pink): central files, address-book DB, client records, invoices, treasury.
-- **Div 4 Coding Production** (green): 2 agents (py/js react-vite/vue builder; n8n specialist into Div 6),
-  graph-DB production, key MCPs.
-- **Div 5 Debug** (not-specced) — placeholder "Coming Soon".
-- **Div 6 Public CRM** (yellow): n8n marketing flows, marketing DB, graph DBs → Div 1.
-
-**Cross-rules:** full-width pages; input parity (voice + click/type); all future modules adopt the theme;
-nothing voice-only.
+### 6. Reload the desktop plugin (hot reload)
+```powershell
+# In Hermes desktop: ⌘K → "Reload desktop plugins"
+```
+You should now see:
+- **Sidebar → "Lars"** (order 50, next to Kanban)
+- Clicking "Lars" opens the **Div 7 Master page** (resolver to last-visited Div page)
+- Left rail: 7 Div menu items (7 / 1 / 2 / 3 / 4 / 5 / 6) with per-Div colors, collapsible to thin strip
+- Right side: **JarvisMic** reactor module (lower-right, cyan/amber rings + pulsing orb + waveform bars)
+- **Utilities rail** (thin vertical, ~64px): cpu%, ram%, disk%, up(h), rel, sess, gw, model, profile, ctx%, crn
 
 ---
 
-## 5. Page layout (master)
+## What's in this repo (machine-2)
 
-Full canonical spec: **`specs/layout-master.md`**. Skeleton for every Lars page:
-- **No top menu / no top header.** Page owns the viewport.
-- **Far right top**: logo placeholder + "**Lars**" + "personal Hermes genius". Far upper right: menu
-  left/right toggle + light/dark toggle.
-- **Left rail**: custom vertical menu — 7 Lars / 1 Comms / 2 Clients / 3 Records / 4 Production /
-  5 Debug / 6 Public / Settings. No border lines (faint shadow). **Settings expands the full core Hermes
-  menu + plugins** (smaller font), nav normally.
-- **Chat dock**: opposite lower corner, auto-flips with menu side; defaults to that page's agent;
-  3 modes — off / 25% of screen width / full (see §3 for the desktop-build override).
-- **Utility strip**: thin (~1/15 width) above chat; CPU, RAM, agent threads, live crons, Hermes + Lars
-  versions, time-to-first-token, tokens/day. No title; coolest-styled status chips.
-- **Content region**: staggered flex cards, some expand on click; page scrolls.
+```
+lars-hermes-theme/
+├── desktop-plugins/lars/plugin.js     # DESKTOP PLUGIN (primary) — copy to %LOCALAPPDATA%\hermes\desktop-plugins\lars\
+├── plugins/lars/
+│   ├── dashboard/
+│   │   ├── manifest.json              # declares "api": "plugin_api.py"
+│   │   ├── plugin_api.py              # Python backend: /stats (psutil), mounted at /api/plugins/lars/
+│   │   └── dist/index.js              # browser dashboard plugin (legacy, kept for no-conflict)
+│   ├── theme/strike-freedom.yaml      # dashboard theme (legacy, kept for no-conflict)
+│   └── README.md                      # browser plugin docs (legacy)
+├── specs/layout-master.md             # canonical page layout spec
+├── themes/hinokami-night.yaml         # desktop theme (dark)
+├── themes/lars-yakuza.yaml            # desktop theme (light)
+├── OLD-README.md                      # archived history (dashboard pivots)
+└── README.md                          # this file
+```
 
-**Theme mapping:** dark = Lars Jarvis, light = Lars Yakuza.
-
----
-
-## 6. Browser-app build (second, to follow)
-
-A **standalone browser app** mirroring the same schema (jarvis_ai-validated pattern): own full-width HUD,
-no Hermes chrome; same Div pages/cards; the only iframe = opening a core Hermes page from the Settings
-menu. Served by **uvicorn + FastAPI on `:9120`** (same stack as `:9119`), auto-launched by its own VBS in
-Startup. **No proxy needed** — CORS is already open to localhost origins
-(`allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"`) and the auth gate is off on loopback.
-Runs as a **second process** next to Hermes core (the accepted cost of "nothing-Hermes"). RAM-cheap
-(~176 MB class vs desktop ~1.5 GB).
+**Key files for a fresh install:** `desktop-plugins/lars/plugin.js` + `plugins/lars/dashboard/` (manifest + plugin_api.py)
 
 ---
 
-## 7. Integration stack / ports / environment (this machine)
+## Architecture (machine-2 build)
+
+### Desktop Plugin SDK (primary)
+- **Entry point:** `desktop-plugins/lars/plugin.js` (plain ESM, no build, hot reload)
+- **Import surface:** `@hermes/plugin-sdk` + `react` + `react/jsx-runtime` only
+- **Route areas:** 7 `ROUTES_AREA` pages at `/lars`, `/lars-comms`, `/lars-clients`, `/lars-records`, `/lars-production`, `/lars-debug`, `/lars-crm`
+- **Sidebar nav:** 1 `SIDEBAR_NAV_AREA` row ("Lars", codicon `LayoutDashboard`, order 50)
+- **Resolver:** `/lars` restores `lastPage` from `ctx.storage` + per-page state (collapsed menu, expanded boxes, scroll position)
+- **Utilities rail:** live data from `host.status()` + `host.state.*` + `ctx.rest('/stats')` (Python backend) + `host.request('cron.manage')`
+- **Voice module:** `JarvisMic` — self-contained SVG reactor (counter-rotating rings, pulsing orb, 7 waveform bars, EXPAND button → core Session chat)
+- **Theme:** Jarvis palette (cyan `#40f3ff`, amber `#ffb648`, near-black `#02070c`, Chakra Petch + JetBrains Mono) — injected CSS, no sandbox
+
+### Browser App (deferred mirror)
+- Kept in `plugins/lars/dashboard/` (manifest + `dist/index.js`) — **web dashboard plugin only**
+- Purpose: folder/naming/loading conflict avoidance with desktop plugin
+- Direction: standalone FastAPI/uvicorn on `:9120` (mirror schema later, not built yet)
+
+### Theme Assets
+- `themes/hinokami-night.yaml` — dark DesktopTheme (registers in `THEMES_AREA`)
+- `themes/lars-yakuza.yaml` — light DesktopTheme
+- Applied via `useTheme().setTheme('hinokami-night')` or palette command
+
+---
+
+## Machine-2 specifics (this environment)
 
 | What | Where | Port |
 |---|---|---|
-| **Hermes browser dashboard** | auto-launched via `Startup\Hermes_Dashboard.vbs` → `hermes dashboard --no-open --isolated --host 127.0.0.1 --port 9119` (removes `HERMES_WEB_DIST`) | **:9119** |
-| **Gateway API** | auto-starts at login (`Startup\Hermes_Gateway.vbs` → `gateway-service\`) | **:8642** |
-| **n8n** (automation hub) | bare-metal, self-started via own bat | **:5678** |
+| **Hermes browser dashboard** | `Startup\Hermes_Dashboard.vbs` → `hermes dashboard --no-open --isolated --host 127.0.0.1 --port 9119` | **:9119** |
+| **Gateway API** | `Startup\Hermes_Gateway.vbs` → `gateway-service\` | **:8642** |
+| **n8n** (automation hub) | bare-metal bat | **:5678** |
 | **PostgreSQL** | local server | **:5432** |
-| **pgweb** (Postgres table viewer in browser) | `bin\pgweb-start.bat` (reads `PGPASSWORD` from hermes `.env`) | **:8082** (changed from :8081) |
-| **Docker Desktop** (SAAS org-board containers) | self-started | **:8080** |
-| **Hermes home** | `C:\Users\q1fre\AppData\Local\hermes\` (config.yaml, `.env`, dashboard-service, plugins) | — |
+| **pgweb** | `bin\pgweb-start.bat` (reads `PGPASSWORD` from `.env`) | **:8082** |
+| **Docker Desktop** | self-started | **:8080** |
+| **Hermes home** | `C:\Users\q1fre\AppData\Local\hermes\` | — |
 
-**Port notes:** Hermes itself does NOT use 8080/8081. pgweb moved **8081 → 8082** so an app that wants
-8081 is free. 8080 is claimed by Docker/WSL relay when running.
+**Secrets in `.env`:** OPENROUTER_API_KEY, DEEPINFRA_API_KEY, GROQ_API_KEY, ELEVENLABS_API_KEY, N8N_API_KEY, PGPASSWORD, SLACK_*, WHATSAPP_*, META_ACCESS_TOKEN
 
-**Secrets in `.env`:** OPENROUTER_API_KEY (primary brain), DEEPINFRA_API_KEY, GROQ_API_KEY,
-ELEVENLABS_API_KEY (voice), N8N_API_KEY, PGPASSWORD, SLACK_*, WHATSAPP_*, META_ACCESS_TOKEN.
-
-**Model chain:** z-ai/glm-5.3-flash primary → openrouter deepseek-v4-flash → deepinfra deepseek-v4-flash.
+**Model chain:** z-ai/glm-5.3-flash primary → openrouter deepseek-v4-flash → deepinfra deepseek-v4-flash
 
 ---
 
-## 8. Online references
+## Development workflow (this machine)
+
+### Edit the desktop plugin
+```powershell
+# Edit the source
+code .\desktop-plugins\lars\plugin.js
+# Save → Hermes hot-reloads automatically (or ⌘K → Reload desktop plugins)
+```
+
+### Edit the Python backend
+```powershell
+# Edit source
+code .\plugins\lars\dashboard\plugin_api.py
+# Copy to live (gateway imports at startup only)
+Copy-Item .\plugins\lars\dashboard\plugin_api.py "$env:LOCALAPPDATA\hermes\plugins\lars\dashboard\plugin_api.py" -Force
+# Restart Hermes (gateway) to pick up changes
+```
+
+### Sync back to repo
+```powershell
+git add -A
+git commit -m "message"
+git push origin machine-2
+```
+
+### Pull to primary machine (main branch)
+```powershell
+# On primary machine:
+git fetch origin
+git checkout main
+git merge origin/machine-2  # or cherry-pick specific commits
+# Re-run install steps 3-4 if new files added
+```
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| "Plugin lars failed to load" toast | Check `plugin.js` syntax: `node --check %LOCALAPPDATA%\hermes\desktop-plugins\lars\plugin.js` |
+| Utilities rail shows `β` for cpu/ram/disk/up | Python backend not loaded: verify `lars` in `plugins.enabled` in `config.yaml`, restart Hermes |
+| `crn` shows `0` / `β` | No cron jobs defined yet (normal); or `cron.manage` RPC failed — check gateway logs |
+| JarvisMic not animating | `⌘K → Reload desktop plugins`; ensure no JS errors in devtools (F12 in Hermes) |
+| Sidebar "Lars" missing | Plugin not loaded; check door path matches exactly `desktop-plugins/lars/plugin.js` |
+| Theme not applying | Themes register in `THEMES_AREA`; select via ⌘K → "Theme: hinokami-night" |
+
+---
+
+## Branching strategy
+
+- **`main`** — owned by primary machine; stable, installable
+- **`machine-2`** — this machine's development fork; push here, merge/cherry-pick to `main` when ready
+- **Never force-push `main`** — only fast-forward or PR from `machine-2`
+
+---
+
+## References
 
 | Ref | Covers |
 |---|---|
@@ -158,14 +221,6 @@ ELEVENLABS_API_KEY (voice), N8N_API_KEY, PGPASSWORD, SLACK_*, WHATSAPP_*, META_A
 | https://github.com/Itsme23476/jarvis-hermes-dashboard | Styling source (local clone in `Git-Repos/`) |
 | https://github.com/eadmin2/jarvis_ai | Voice-HUD + iframe-overlay pattern reference (standalone build) |
 | https://hermes-agent.nousresearch.com/docs/ | Hermes docs (dashboard/desktop/plugins) |
-
----
-
-## 9. Open questions (parked)
-
-- Exact voice wiring detail: big-mic → STT/TTS (endpoints exist: `/api/audio/transcribe`, `/api/audio/speak`, `/api/audio/voice-live/*`).
-- Agent→page navigation from chat (tool or slash commands) — later.
-- Skill files per Div agent — later.
 
 ---
 
