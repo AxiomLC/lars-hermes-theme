@@ -26,7 +26,7 @@
  * URI, or moving the plugin to a bundled/unified package.
  */
 
-import { atom, host, icons, PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, useValue } from '@hermes/plugin-sdk'
+import { atom, host, icons, PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, useQuery, useValue } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'lars' // must match the folder name
@@ -73,6 +73,7 @@ const LOGO_SVG =
 // Python plugin_api.py backend (ctx.rest) and carry a "β" marker for now —
 // never fabricated values.
 let statusSnapshot = null // filled by host.status(); never user-set
+let pluginCtx = null // set in register(); used by UtilitiesRail for ctx.rest
 
 // Jarvis palette + fonts lifted from Itsme23476/jarvis-hermes-dashboard
 // (ui/styles.css, verified above): cyan/amber on near-black, JetBrains Mono
@@ -125,6 +126,32 @@ function UtilitiesRail() {
   const gateway = useValue(host.state.gateway)
   const usage = useValue(host.state.focusedUsage)
 
+  // Python backend (plugins/lars/dashboard/plugin_api.py, mounted by the
+  // gateway at /api/plugins/lars). Degrades to 'β' when the gateway hasn't
+  // imported it (plugins.enabled gate) or the call fails — never fabricated.
+  const sysQ = useQuery({
+    queryKey: ['lars-sysstats'],
+    queryFn: () => (pluginCtx ? pluginCtx.rest('/stats', { timeoutMs: 4000 }) : Promise.reject(new Error('no ctx'))),
+    refetchInterval: 5000,
+    retry: false
+  })
+  const sys = sysQ.data && sysQ.data.ok ? sysQ.data : null
+
+  // Crons via gateway RPC (list of defined jobs + running count when present).
+  const cronQ = useQuery({
+    queryKey: ['lars-crons'],
+    queryFn: () => host.request('cron.manage', { action: 'list' }),
+    refetchInterval: 15000,
+    retry: false
+  })
+  const cronJobs = Array.isArray(cronQ.data && (cronQ.data.jobs || cronQ.data.items))
+    ? (cronQ.data.jobs || cronQ.data.items)
+    : null
+  const cronCount = cronJobs ? cronJobs.length : null
+  const cronRunning = cronJobs
+    ? cronJobs.filter(j => j && (j.running || j.status === 'running' || j.enabled !== false && j.next_run)).length
+    : null
+
   const st = statusSnapshot
   const pct =
     usage && typeof usage.context_percent === 'number'
@@ -146,17 +173,21 @@ function UtilitiesRail() {
     },
     children: [
       jsx('div', { style: { fontSize: '8px', color: JV.dim, letterSpacing: '0.08em' }, children: 'UTIL' }),
-      jsx(UtilityChip, { icon: icons.Cpu, label: 'cpu', value: 'β' }),
+      jsx(UtilityChip, { icon: icons.Cpu, label: 'cpu', value: sys ? `${sys.cpu_percent}%` : 'β', glow: !!sys }),
+      jsx(UtilityChip, { icon: icons.Cpu, label: 'ram', value: sys ? `${sys.ram_percent}%` : 'β' }),
+      jsx(UtilityChip, { icon: icons.Box, label: 'disk', value: sys ? `${sys.disk_percent}%` : 'β' }),
+      jsx(UtilityChip, { icon: icons.Clock, label: 'up', value: sys ? `${Math.round(sys.uptime_s / 3600)}h` : 'β' }),
       jsx(UtilityChip, { icon: icons.Clock, label: 'rel', value: st ? (st.release_date || '—') : '…' }),
       jsx(UtilityChip, { icon: icons.Globe, label: 'sess', value: st ? String(st.active_sessions) : '…', glow: true }),
       jsx(UtilityChip, { icon: icons.Activity, label: 'gw', value: gateway === 'open' ? 'on' : gateway, glow: gateway === 'open' }),
       jsx(UtilityChip, { icon: icons.Terminal, label: 'model', value: model || '—' }),
       jsx(UtilityChip, { icon: icons.GitBranch, label: 'profile', value: profile || '—' }),
       jsx(UtilityChip, { icon: icons.Zap, label: 'ctx', value: pct, glow: true }),
-      // Backend-gated stats (need plugin_api.py): β marker, not fabricated.
-      jsx(UtilityChip, { icon: icons.Cpu, label: 'ram', value: 'β' }),
-      jsx(UtilityChip, { icon: icons.Box, label: 'disk', value: 'β' }),
-      jsx(UtilityChip, { icon: icons.Clock, label: 'crn', value: 'β' })
+      jsx(UtilityChip, {
+        icon: icons.Clock,
+        label: 'crn',
+        value: cronCount != null ? `${cronCount}${cronRunning ? ` · ${cronRunning}run` : ''}` : 'β'
+      })
     ]
   })
 }
@@ -459,6 +490,7 @@ export default {
   description: 'Lars platform — Executive Div 7 home + 6 Division pages, shared states.',
   defaultEnabled: true,
   register(ctx) {
+    pluginCtx = ctx
     // One-shot + periodic status snapshot for the utilities rail.
     const refreshStatus = () => {
       if (typeof host.status === 'function') {
