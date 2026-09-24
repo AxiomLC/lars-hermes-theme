@@ -3,8 +3,7 @@
  *
  * Div platform: 7 pages under one shell — Exec Div 7 home + 6 Division pages.
  * Div 7 is the template: staggered click-to-expand boxes, a lower-right
- * voice/mic module (graphic only for now), and a thin right-hand utilities
- * rail fed by live Hermes APIs (host.status / host.state / focusedUsage).
+ * voice/mic module (graphic only for now).
  *
  * STATES: every page persists its state (collapsed menu, expanded boxes,
  * scroll position) in ctx.storage (namespaced to this plugin). The core
@@ -24,9 +23,14 @@
  * CANNOT be referenced by relative path. The logo below is an inline SVG
  * placeholder; swapping in a real image needs either an HTTPS url, a data:
  * URI, or moving the plugin to a bundled/unified package.
+ *
+ * NOTE (utilities rail removed 2026-09-24): the UtilitiesRail + plugin_api.py
+ * backend were stripped from this build pending the revised family-wide
+ * resource monitor (see Utility-Monitor-README.md). Voice/mic (JarvisMic)
+ * kept as graphic placeholder per plan.
  */
 
-import { atom, host, icons, PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, useQuery, useValue } from '@hermes/plugin-sdk'
+import { atom, host, icons, PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, useValue } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'lars' // must match the folder name
@@ -61,20 +65,6 @@ const LOGO_SVG =
   '<polygon points="17,3 30,11 30,25 17,31 4,25 4,11" fill="%232563eb" stroke="%2340f3ff" stroke-width="1.2"/>' +
   '<text x="17" y="24" font-size="15" font-family="sans-serif" fill="%23ffffff" text-anchor="middle">7</text></svg>'
 
-// ── Utilities rail: live data (verified against SDK) ─────────────────────────
-// host.status()  → version, release_date, active_sessions, gateway state
-// host.state     → model, profile, gateway socket, focusedUsage (live tokens)
-// Research (2026-09-24): NO existing Hermes desktop plugin does this. The only
-// known attempt is draft PR NousResearch/hermes-agent#91204
-// ("system.resources" RPC: CPU/RAM/disk/uptime) — never merged, and its
-// companion plugin repo (agentik-os/hermes-account-resource-footer) is 404.
-// The web dashboard has /api/system/stats but that's the browser surface —
-// NOT reachable from a desktop renderer plugin. So CPU/RAM/cron/uptime need a
-// Python plugin_api.py backend (ctx.rest) and carry a "β" marker for now —
-// never fabricated values.
-let statusSnapshot = null // filled by host.status(); never user-set
-let pluginCtx = null // set in register(); used by UtilitiesRail for ctx.rest
-
 // Jarvis palette + fonts lifted from Itsme23476/jarvis-hermes-dashboard
 // (ui/styles.css, verified above): cyan/amber on near-black, JetBrains Mono
 // display font. This is the plugin-layer (expanded) theme; the core-wide
@@ -98,107 +88,13 @@ const JV = {
   mono: '"JetBrains Mono",ui-monospace,Menlo,monospace'
 }
 
-function UtilityChip({ icon, label, value, glow }) {
-  return jsxs('div', {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'flex-start',
-      padding: '2px 5px',
-      borderRadius: '3px',
-      border: `1px solid ${JV.edge}`,
-      background: 'rgba(2,7,12,0.55)',
-      color: 'var(--ui-text-secondary)',
-      fontSize: '10px',
-      lineHeight: '12px',
-      textShadow: glow ? `0 0 6px ${JV.cyan}` : 'none'
-    },
-    children: [
-      jsx('span', { style: { fontSize: '9px', color: JV.dim, textTransform: 'uppercase', letterSpacing: '0.04em' }, children: label }),
-      jsx('span', { style: { fontSize: '11px', color: glow ? JV.cyan : JV.ink, textShadow: glow ? `0 0 5px ${JV.cyan}` : 'none' }, children: value })
-    ]
-  })
-}
-
-function UtilitiesRail() {
-  const model = useValue(host.state.model)
-  const profile = useValue(host.state.profile)
-  const gateway = useValue(host.state.gateway)
-  const usage = useValue(host.state.focusedUsage)
-
-  // Python backend (plugins/lars/dashboard/plugin_api.py, mounted by the
-  // gateway at /api/plugins/lars). Degrades to 'β' when the gateway hasn't
-  // imported it (plugins.enabled gate) or the call fails — never fabricated.
-  const sysQ = useQuery({
-    queryKey: ['lars-sysstats'],
-    queryFn: () => (pluginCtx ? pluginCtx.rest('/stats', { timeoutMs: 4000 }) : Promise.reject(new Error('no ctx'))),
-    refetchInterval: 5000,
-    retry: false
-  })
-  const sys = sysQ.data && sysQ.data.ok ? sysQ.data : null
-
-  // Crons via gateway RPC (list of defined jobs + running count when present).
-  const cronQ = useQuery({
-    queryKey: ['lars-crons'],
-    queryFn: () => host.request('cron.manage', { action: 'list' }),
-    refetchInterval: 15000,
-    retry: false
-  })
-  const cronJobs = Array.isArray(cronQ.data && (cronQ.data.jobs || cronQ.data.items))
-    ? (cronQ.data.jobs || cronQ.data.items)
-    : null
-  const cronCount = cronJobs ? cronJobs.length : null
-  const cronRunning = cronJobs
-    ? cronJobs.filter(j => j && (j.running || j.status === 'running' || j.enabled !== false && j.next_run)).length
-    : null
-
-  const st = statusSnapshot
-  const pct =
-    usage && typeof usage.context_percent === 'number'
-      ? `${Math.round(usage.context_percent)}%`
-      : usage && typeof usage.context_used === 'number'
-        ? `${Math.round(usage.context_used / 1000)}k`
-        : '—'
-
-  return jsxs('div', {
-    style: {
-      width: '64px',
-      height: '100%',
-      overflowY: 'auto',
-      padding: '5px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '3px',
-      background: 'transparent'
-    },
-    children: [
-          jsx('div', { style: { fontSize: '8px', color: JV.dim, letterSpacing: '0.08em' }, children: 'UTIL' }),
-          jsx(UtilityChip, { icon: icons.Cpu, label: 'cpu', value: sys ? `${sys.cpu_percent}%` : 'β', glow: !!sys }),
-          jsx(UtilityChip, { icon: icons.Cpu, label: 'ram', value: sys ? `${sys.ram_mb}MB` : 'β' }),
-          jsx(UtilityChip, { icon: icons.Box, label: 'disk', value: sys ? `${sys.disk_percent}%` : 'β' }),
-          jsx(UtilityChip, { icon: icons.Clock, label: 'up', value: sys ? `${Math.round(sys.proc_uptime_s / 3600)}h` : 'β' }),
-          jsx(UtilityChip, { icon: icons.Clock, label: 'rel', value: st ? (st.release_date || '—') : '…' }),
-      jsx(UtilityChip, { icon: icons.Globe, label: 'sess', value: st ? String(st.active_sessions) : '…', glow: true }),
-      jsx(UtilityChip, { icon: icons.Activity, label: 'gw', value: gateway === 'open' ? 'on' : gateway, glow: gateway === 'open' }),
-      jsx(UtilityChip, { icon: icons.Terminal, label: 'model', value: model || '—' }),
-      jsx(UtilityChip, { icon: icons.GitBranch, label: 'profile', value: profile || '—' }),
-      jsx(UtilityChip, { icon: icons.Zap, label: 'ctx', value: pct, glow: true }),
-      jsx(UtilityChip, {
-        icon: icons.Clock,
-        label: 'crn',
-        value: cronCount != null ? `${cronCount}${cronRunning ? ` · ${cronRunning}run` : ''}` : 'β'
-      })
-    ]
-  })
-}
-
 // ── JarvisMic — dynamic voice module (lower-right of Div 7) ──────────────────
 // Dark-glass reactor: two counter-rotating dashed rings, three colored arcs
 // lunging over a pulsing glowing orb, plus live waveform bars (CSS-animated).
 // Animations run through an injected <style> tag — pages are sandbox-free, so
-// this is allowed. FINAL WIRING: the orb/waveform will be driven by real audio
-// (vm.live events + /api/audio/transcribe + /api/audio/speak), hung on
-// host.onEvent + ctx.rest once we build the Python backend half.
+// this is allowed. PLACEHOLDER: orb/waveform will be driven by the local voice
+// service per Voice-AI-README.md (rev 2) once built — AudioWorklet PCM capture,
+// WebSocket to :8000, streamed TTS playback. EXPAND → core Hermes session chat.
 function JarvisMic({ div }) {
   const micCSS =
     '@keyframes ljSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}' +
@@ -407,8 +303,8 @@ function LarsPage({ collapsedAtom, expandedAtom, activePath, div, store }) {
   })
 
   // Voice/mic module (Div 7): Jarvis-style dynamic reactor graphic.
-  // Graphic + animation only for now — final wiring (real STT/TTS) noted at
-  // the bottom of this file. Expand → core Hermes session chat.
+  // Graphic + animation only for now — real STT/TTS wiring per
+  // Voice-AI-README.md (rev 2). Expand → core Hermes session chat.
   const micModule = jsx(JarvisMic, { div })
 
   return jsxs('div', {
@@ -476,9 +372,8 @@ function LarsPage({ collapsedAtom, expandedAtom, activePath, div, store }) {
             : [jsx('div', { style: { color: 'var(--ui-text-secondary)', fontSize: '14px' }, children: div.placeholder })]
         })
       }),
-      // Div 7 extra layers: mic (bottom-right) + utilities rail (right edge).
-      isHome ? micModule : null,
-      jsx(UtilitiesRail, {})
+      // Div 7 extra layer: mic (bottom-right).
+      isHome ? micModule : null
     ]
   })
 }
@@ -490,22 +385,6 @@ export default {
   description: 'Lars platform — Executive Div 7 home + 6 Division pages, shared states.',
   defaultEnabled: true,
   register(ctx) {
-    pluginCtx = ctx
-    // One-shot + periodic status snapshot for the utilities rail.
-    const refreshStatus = () => {
-      if (typeof host.status === 'function') {
-        host.status()
-          .then(s => {
-            if (s) statusSnapshot = s
-          })
-          .catch(() => {
-            /* gateway not up — rail keeps placeholders */
-          })
-      }
-    }
-    refreshStatus()
-    ctx.setInterval(refreshStatus, 30000)
-
     // Collapse state: one atom for the whole plugin, seeded from storage.
     const collapsedAtom = atom(ctx.storage.get('menuCollapsed', false))
     collapsedAtom.listen(v => ctx.storage.set('menuCollapsed', v))

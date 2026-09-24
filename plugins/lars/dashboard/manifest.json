@@ -9,7 +9,10 @@
     "override": "/",
     "position": "start"
   },
-  "slots": ["sidebar", "header-left", "footer-right"],
-  "entry": "dist/index.js",
-  "api": "plugin_api.py"
+  "slots": [
+    "sidebar",
+    "header-left",
+    "footer-right"
+  ],
+  "entry": "dist/index.js"
 }
