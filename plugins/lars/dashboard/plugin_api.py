@@ -44,24 +44,34 @@ async def stats():
         "os": f"{platform.system()} {platform.release()}",
         "python": platform.python_version(),
         "hermes": _hermes_version(),
-        "uptime_s": int(time.time() - getattr(platform, "_psutil_boot", 0) or 0),
     }
 
     try:
         import psutil
 
-        out["cpu_percent"] = round(psutil.cpu_percent(interval=None) or 0.0, 1)
-        vm = psutil.virtual_memory()
-        out["ram_percent"] = round(vm.percent, 1)
-        out["ram_used_gb"] = round(vm.used / 2**30, 2)
-        out["ram_total_gb"] = round(vm.total / 2**30, 1)
-        du = psutil.disk_usage(os.path.expanduser("~"))
-        out["disk_percent"] = round(du.percent, 1)
-        out["uptime_s"] = int(time.time() - psutil.boot_time())
+        # Hermes gateway process (the one running this code)
         proc = psutil.Process()
-        out["proc_rss_mb"] = round(proc.memory_info().rss / 2**20, 0)
-        out["proc_threads"] = proc.num_threads()
-    except Exception as exc:  # degrade, never 500 the rail
+        with proc.oneshot():
+            # CPU % of THIS process (interval=None = non-blocking, compare to last call)
+            cpu_pct = proc.cpu_percent(interval=None)
+            out["cpu_percent"] = round(cpu_pct or 0.0, 1)
+            # RSS of THIS process
+            mem = proc.memory_info()
+            out["ram_mb"] = round(mem.rss / 2**20, 1)
+            out["ram_percent_of_system"] = round(mem.rss / psutil.virtual_memory().total * 100, 2)
+            out["threads"] = proc.num_threads()
+            # Process uptime
+            out["proc_uptime_s"] = int(time.time() - proc.create_time())
+            # Disk: Hermes home directory usage
+            hermes_home = os.path.expanduser(r"~\AppData\Local\hermes")
+            if os.path.exists(hermes_home):
+                du = psutil.disk_usage(hermes_home)
+                out["disk_percent"] = round(du.percent, 1)
+                out["disk_used_gb"] = round(du.used / 2**30, 2)
+                out["disk_total_gb"] = round(du.total / 2**30, 1)
+            else:
+                out["disk_percent"] = 0.0
+    except Exception as exc:
         out["ok"] = False
         out["error"] = str(exc)[:200]
 

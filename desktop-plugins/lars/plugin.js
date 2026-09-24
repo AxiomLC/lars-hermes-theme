@@ -172,12 +172,12 @@ function UtilitiesRail() {
       background: 'transparent'
     },
     children: [
-      jsx('div', { style: { fontSize: '8px', color: JV.dim, letterSpacing: '0.08em' }, children: 'UTIL' }),
-      jsx(UtilityChip, { icon: icons.Cpu, label: 'cpu', value: sys ? `${sys.cpu_percent}%` : 'β', glow: !!sys }),
-      jsx(UtilityChip, { icon: icons.Cpu, label: 'ram', value: sys ? `${sys.ram_percent}%` : 'β' }),
-      jsx(UtilityChip, { icon: icons.Box, label: 'disk', value: sys ? `${sys.disk_percent}%` : 'β' }),
-      jsx(UtilityChip, { icon: icons.Clock, label: 'up', value: sys ? `${Math.round(sys.uptime_s / 3600)}h` : 'β' }),
-      jsx(UtilityChip, { icon: icons.Clock, label: 'rel', value: st ? (st.release_date || '—') : '…' }),
+          jsx('div', { style: { fontSize: '8px', color: JV.dim, letterSpacing: '0.08em' }, children: 'UTIL' }),
+          jsx(UtilityChip, { icon: icons.Cpu, label: 'cpu', value: sys ? `${sys.cpu_percent}%` : 'β', glow: !!sys }),
+          jsx(UtilityChip, { icon: icons.Cpu, label: 'ram', value: sys ? `${sys.ram_mb}MB` : 'β' }),
+          jsx(UtilityChip, { icon: icons.Box, label: 'disk', value: sys ? `${sys.disk_percent}%` : 'β' }),
+          jsx(UtilityChip, { icon: icons.Clock, label: 'up', value: sys ? `${Math.round(sys.proc_uptime_s / 3600)}h` : 'β' }),
+          jsx(UtilityChip, { icon: icons.Clock, label: 'rel', value: st ? (st.release_date || '—') : '…' }),
       jsx(UtilityChip, { icon: icons.Globe, label: 'sess', value: st ? String(st.active_sessions) : '…', glow: true }),
       jsx(UtilityChip, { icon: icons.Activity, label: 'gw', value: gateway === 'open' ? 'on' : gateway, glow: gateway === 'open' }),
       jsx(UtilityChip, { icon: icons.Terminal, label: 'model', value: model || '—' }),
