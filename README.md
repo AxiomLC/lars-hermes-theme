@@ -118,7 +118,7 @@ lars-hermes-theme/
 
 ### Desktop Plugin SDK (primary)
 - **Entry point:** `desktop-plugins/lars/plugin.js` (plain ESM, no build, hot reload)
-- **Import surface:** `@hermes/plugin-sdk` + `react` + `react/jsx-runtime` only
+- **Import surface:** `@hermes/plugin-sdk` + `react` + `react/jsx-runtime` **only** — no npm, no local files, no CDN ES modules; the renderer resolves nothing else. External libs must be inlined or moved to the Python backend (`plugin_api.py`).
 - **Route areas:** 7 `ROUTES_AREA` pages at `/lars`, `/lars-comms`, `/lars-clients`, `/lars-records`, `/lars-production`, `/lars-debug`, `/lars-crm`
 - **Sidebar nav:** 1 `SIDEBAR_NAV_AREA` row ("Lars", codicon `LayoutDashboard`, order 50)
 - **Resolver:** `/lars` restores `lastPage` from `ctx.storage` + per-page state (collapsed menu, expanded boxes, scroll position)
