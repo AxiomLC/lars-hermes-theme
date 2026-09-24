@@ -1,575 +1,212 @@
-Here is the complete architectural build document formatted as a standalone Markdown file. You can save this directly as `HERMES_VOICE_BUILD.md` in your repository root.
+# Voice-AI-README.md — Lars Voice Module (rev. 2)
+
+**Branch:** machine-2 · **Status:** agreed design, supersedes rev. 1
+**Build doc:** Hermes Local Voice Core — Windows 11, CPU-only, plugin-page voice for the Div 7 orb.
 
 ---
 
-# Technical Build Specification: Hermes Local Voice Core (Windows 11 CPU / Intel i5)
+## 1. Constraint (why this stack exists)
 
-## 1. System Context & Target Constraints
-
-* **Hardware Target:** Lenovo17 (Intel Core i5-12500H, 16 GB RAM, Intel Iris Xe Integrated Graphics)
-* **OS:** Windows 11 Home / Pro (x64)
-* **Storage Budget:** Low availability (~8 GB remaining). Build strictly relies on lightweight ONNX weights and CPU-quantized PyTorch tensors. Zero CUDA wheel downloads (`--index-url [https://download.pytorch.org/whl/cpu](https://download.pytorch.org/whl/cpu)`).
-* **Hermes Release:** Hermes Agent `v0.21.5`
-* **Target Latency:** Total end-to-end voice loop $< 400\text{ ms}$ on 4 CPU performance threads.
-
----
-
-## 2. Low-Resource Audio Architecture
+The Hermes desktop plugin page **cannot access core Hermes STT, TTS, or mic** — the plugin
+sandbox resolves only `@hermes/plugin-sdk`, `react`, `react/jsx-runtime`; there is no audio
+door in the SDK. The "native voice" in the desktop app belongs to the core chat UI, not to a
+custom page. Therefore the voice edge is fully local and self-hosted; the *agent* is real Hermes.
 
 ```
-[ Micro / Audio In ] 
-         │
-         ▼ (PCM 16kHz WebSocket / WebRTC)
-[ Fast-VAD: Silero-VAD ONNX ] ── (Speech Start/End Triggers)
-         │
-         ▼
-[ STT: Sherpa-ONNX (Zipformer / Moonshine-Tiny) ]
-         │ (Streaming Text Tokens)
-         ▼
-[ Agent Loop: Hermes v0.21.5 ]
-         │ (Text Response Stream)
-         ▼
-[ TTS: Kyutai Pocket-TTS (Mimi Codec / FlowLM CPU) ]
-         │ (Streaming PCM Audio Chunks)
-         ▼
-[ Speaker / Audio Out ]
-
+[ Div 7 plugin page ]  JarvisMic (React) + AudioWorklet capture + AudioContext playback
+        │  ws://127.0.0.1:8000/ws/voice   (Origin-checked, per-boot token)
+[ LOCAL VOICE SERVICE ]  FastAPI :8000, own venv, CPU-only
+        │  agent_bridge → REAL Lars session (same one SESSIONS shows)
+[ Hermes gateway → Lars profile ]   ← chat state + memory live here
 ```
 
-### Component Breakdown & Resource Footprint
-
-| Subsystem | Model / Engine | Provider / Library | RAM Footprint | Disk Footprint |
-| --- | --- | --- | --- | --- |
-| **VAD** | Silero VAD v4 (ONNX) | `onnxruntime` | ~30 MB | ~2 MB |
-| **STT** | Zipformer-En-20M / Moonshine-Tiny | `sherpa-onnx` | ~120 MB | ~60 MB |
-| **Agent** | Hermes `v0.21.5` Core | Custom Hermes Engine | ~250 MB | Repository |
-| **TTS** | Pocket-TTS (FlowLM 100M) | `pocket-tts` | ~350 MB | ~210 MB |
+Audio flow is **page → service → Lars → service → page**. The page owns the mic; the service
+owns models.
 
 ---
 
-## 3. Environment Setup & Dependency Isolation
+## 2. State machine (the whole UX)
 
-To prevent downloading CUDA dependencies (~3 GB) on Windows, force CPU wheel indices:
+```
+HOT_MIC   ──"Hey Lars" wake OR mic button──▶ LISTENING
+LISTENING ──speech detected──▶ CAPTURING ──600 ms silence──▶ PROCESSING ──first sentence──▶ SPEAKING
+SPEAKING/PROCESSING ──user speech──▶ CAPTURING      (barge-in: flush queue, cancel TTS + agent)
+SPEAKING  ──reply done──▶ LISTENING                  (re-arm 60 s — continuous conversation)
+LISTENING ──60 s no clear speech──▶ HOT_MIC          (drops back, never dead-ends)
+```
+
+- **HOT_MIC** — page keeps mic open and streams; service runs wake-word spotting on the stream.
+- **LISTENING** — entered on wake or button; user has **60 s** to produce clear speech.
+  The 60 s gates *getting* the turn, never the conversation once it starts.
+- **Barge-in** — the moment the user speaks during SPEAKING/PROCESSING, playback queue is
+  flushed, TTS synthesis is cancelled, the agent stream is interrupted, and the turn restarts.
+- **Conversation** — after a reply the loop returns to LISTENING (60 s re-armed). HOT_MIC is
+  only reached after a full minute of silence, or on error/timeout.
+
+---
+
+## 3. Capture & playback (the two things rev. 1 got wrong)
+
+### 3a. Capture — AudioWorklet, raw Int16 PCM @ 16 kHz. NOT MediaRecorder.
+
+Rev. 1 used `MediaRecorder` (webm/opus, 100 ms slices). **Wrong:** wake word, VAD and STT all
+need raw 16 kHz PCM; only the first WebM chunk carries the container header, so later slices
+cannot be decoded independently.
+
+Use an **AudioWorklet** in the page: `getUserMedia({audio: {channelCount:1, sampleRate:16000,
+echoCancellation:true, noiseSuppression:true, autoGainControl:true}})` → `AudioContext` →
+`AudioWorkletNode` → processor posts `Int16` PCM frames to the main thread → WS binary frames.
+Plain Web API, fits the plugin import restrictions, no decoding anywhere. The page captures
+**always** (including HOT_MIC — the service runs wake-word on the stream) so the browser's
+echo cancellation stays in the loop and Lars never hears himself.
+
+Mic lifecycle: on route-leave (navigate to SESSIONS etc.) the page **stops tracks and pauses
+the stream**; on return it re-acquires and resumes. Prevents two consumers of the mic.
+
+### 3b. Playback — manual buffers, back-to-back scheduling, kept refs.
+
+Do **not** `decodeAudioData` raw PCM chunks. The page builds `AudioBuffer`s itself, schedules
+them back-to-back (`onended` chain), and keeps references to every scheduled source so
+barge-in can stop them all at once. `audio_format` frame (below) carries the TTS sample rate.
+
+---
+
+## 4. WebSocket protocol (`ws://127.0.0.1:8000/ws/voice`)
+
+**Out (page → service):**
+
+| Frame | Payload |
+|---|---|
+| `{"event":"hello","token":"<per-boot>"}` | open WS, auth |
+| `{"event":"audio_format","rate":16000}` | declare capture format (once) |
+| `{"event":"listen"}` | mic button = enter LISTENING |
+| `{"event":"wake"}` | client-side wake trigger (if any) |
+| binary | Int16 PCM chunk (16 kHz mono, ~100 ms) |
+| `{"event":"interrupt"}` | barge-in signal (also sent on user speech) |
+| `{"event":"eos"}` | user released the button / end of turn |
+
+**In (service → page):**
+
+| Frame | Payload |
+|---|---|
+| `{"event":"hello_ok"}` | handshake accepted |
+| `{"event":"audio_format","rate":24000}` | TTS sample rate for playback |
+| `{"event":"state","state":"listening"}` | orb glows, 60 s timer starts |
+| `{"event":"text","role":"user"}` | live STT transcript |
+| `{"event":"text","role":"lars"}` | Lars' reply text (streaming) |
+| binary | TTS PCM chunk → scheduled playback |
+| `{"event":"interrupted"}` | barge-in acknowledged, queue flushed |
+| `{"event":"done"}` | reply complete → LISTENING (re-arm) |
+| `{"event":"timeout"}` | 60 s no speech → HOT_MIC |
+| `{"event":"error","msg":…}` | any failure → HOT_MIC |
+
+---
+
+## 5. Local Voice Service (:8000, own venv, CPU wheels only)
+
+```
+voice_server.py   — FastAPI app, WS endpoint, state machine, Origin + token auth
+wake_engine.py    — sherpa-onnx keyword spotter, custom keyword "hey lars" (no training)
+stt_service.py    — sherpa-onnx streaming recognizer (Zipformer-En-20M, greedy, CPU)
+vad.py            — sherpa-onnx endpointing (covers the 600 ms silence rule)
+tts_service.py    — streaming TTS, sentence-level synthesis
+agent_bridge.py   — text → REAL Lars session → streamed reply tokens
+```
 
 ```powershell
-# PowerShell setup
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-# Upgrade core package managers
-python -m pip install --upgrade pip setuptools wheel
-
-# Install PyTorch CPU explicit build first
+python -m venv .venv && .\.venv\Scripts\Activate.ps1
+pip install --upgrade pip setuptools wheel
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-
-# Install Engine Dependencies
-pip install pocket-tts sherpa-onnx onnxruntime numpy fastapi uvicorn websockets sounddevice
-
+pip install sherpa-onnx onnxruntime numpy fastapi uvicorn websockets
+# TTS engine per §6 — pocket-tts (verify streaming) or chosen local engine
 ```
 
----
-
-## 4. Core Service Implementations
-
-### A. Fast VAD & STT Ingestion (`stt_service.py`)
-
-Uses `sherpa-onnx` for real-time streaming audio tokenization without GPU acceleration.
+Run: `uvicorn voice_server:app --host 127.0.0.1 --port 8000 --workers 1`
+(Env a hint of scale only — **no latency numbers claimed, measure after wiring**.)
 
 ```python
-import numpy as np
-import sherpa_onnx
-import asyncio
+# voice_server.py — skeleton (state machine + auth shape)
+import secrets
+from fastapi import FastAPI, WebSocket, Header
 
-class LocalSTTEngine:
-    def __init__(self, tokens_path: str, encoder_path: str, decoder_path: str, joiner_path: str):
-        # Configure Sherpa-ONNX streaming recognizer
-        recognizer_config = sherpa_onnx.OnlineRecognizerConfig(
-            tokens=tokens_path,
-            encoder=encoder_path,
-            decoder=decoder_path,
-            joiner=joiner_path,
-            num_threads=2,
-            decoding_method="greedy_search",
-            provider="cpu"
-        )
-        self.recognizer = sherpa_onnx.CreateOnlineRecognizer(recognizer_config)
-        self.stream = self.recognizer.create_stream()
+app = FastAPI(title="Lars Voice Local Core")
+TOKEN = secrets.token_hex(16)  # per-boot; delivered to the page via the plugin
 
-    def process_pcm_chunk(self, chunk: bytes) -> str:
-        # Convert raw PCM int16 to float32
-        samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
-        self.stream.accept_waveform(16000, samples)
-        
-        while self.recognizer.is_ready(self.stream):
-            self.recognizer.decode_stream(self.stream)
-            
-        return self.recognizer.get_result(self.stream).text
-
-    def reset(self):
-        self.recognizer.reset(self.stream)
-
-```
-
-### B. High-Speed Low-Latency TTS (`tts_service.py`)
-
-Utilizes Kyutai's `pocket-tts` API for low-step flow matching.
-
-```python
-import torch
-import scipy.io.wavfile
-from pocket_tts import TTSModel
-import io
-
-class FastTTSEngine:
-    def __init__(self, voice_prompt: str = "alba"):
-        # Limit PyTorch CPU thread contention on 12500H E-cores
-        torch.set_num_threads(2)
-        self.model = TTSModel.load_model()
-        # Pre-cache voice state to skip runtime latent calculation
-        self.voice_state = self.model.get_state_for_audio_prompt(voice_prompt)
-
-    def synthesize_stream(self, text: str):
-        """Generates audio stream chunks yielding float32 PCM frames"""
-        # pocket-tts generate_audio returns 1D PCM PyTorch Tensor
-        audio_tensor = self.model.generate_audio(self.voice_state, text)
-        pcm_data = audio_tensor.numpy()
-        return self.model.sample_rate, pcm_data
-
-    def export_voice_preset(self, audio_path: str, save_path: str):
-        from pocket_tts import export_model_state
-        state = self.model.get_state_for_audio_prompt(audio_path)
-        export_model_state(state, save_path)
-
-```
-
-### C. Hermes Voice Orchestrator API (`voice_server.py`)
-
-Integrates STT, Hermes Agent processing, and streaming audio back through a FastAPI WebSocket pipeline.
-
-```python
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-import asyncio
-from stt_service import LocalSTTEngine
-from tts_service import FastTTSEngine
-
-app = FastAPI(title="Hermes Voice Local Core")
-
-# Initialize Local Models
-stt = LocalSTTEngine(
-    tokens="./models/tokens.txt",
-    encoder="./models/encoder.onnx",
-    decoder="./models/decoder.onnx",
-    joiner="./models/joiner.onnx"
-)
-tts = FastTTSEngine(voice_prompt="alba")
+async def require_auth(websocket: WebSocket, token: str) -> bool:
+    origin = websocket.headers.get("origin", "")
+    if not origin.startswith(("http://127.0.0.1", "http://localhost")):
+        await websocket.close(code=4403)
+        return False
+    if token != TOKEN:
+        await websocket.close(code=4401)
+        return False
+    return True
 
 @app.websocket("/ws/voice")
-async def voice_endpoint(websocket: WebSocket):
+async def voice_endpoint(websocket: WebSocket, x_token: str = Header(default="")):
     await websocket.accept()
-    print("Hermes local voice socket client connected.")
-    
-    try:
-        while True:
-            # Receive raw PCM bytes from frontend/micro
-            data = await websocket.receive_bytes()
-            
-            # 1. Process STT
-            transcription = stt.process_pcm_chunk(data)
-            
-            if transcription.strip():
-                print(f"User: {transcription}")
-                
-                # 2. Forward to Hermes Engine v0.21.5
-                # (Simulated agent query return)
-                agent_reply = f"Hermes processing: {transcription}" 
-                
-                # 3. Synthesize Speech Output
-                sample_rate, pcm_data = tts.synthesize_stream(agent_reply)
-                
-                # 4. Stream response back
-                await websocket.send_bytes(pcm_data.tobytes())
-                stt.reset()
-                
-    except WebSocketDisconnect:
-        print("Voice client disconnected.")
-
+    if not await require_auth(websocket, x_token):
+        return
+    # state machine: HOT_MIC → LISTENING → CAPTURING → PROCESSING → SPEAKING → LISTENING…
 ```
+
+**Security (non-negotiable):** any web page in the user's browser can reach `127.0.0.1:8000`.
+The Lars backend carries a terminal + command allowlist — a malicious page could feed it
+instructions. Checks: **Origin** on WS upgrade (loopback only) + **per-boot token** handed to
+the page by the plugin (not stored in the page bundle).
 
 ---
 
-## 5. Execution Routine & Hardware Optimization
+## 6. TTS — streaming, per sentence, fully local
 
-Run the execution steps from PowerShell:
-
-```powershell
-# 1. Thread Pinning for Intel Hybrid Architecture (i5-12500H)
-# Assign higher priority to Performance Cores
-$env:OMP_NUM_THREADS="4"
-$env:MKL_NUM_THREADS="4"
-
-# 2. Launch Local Engine
-uvicorn voice_server:app --host 127.0.0.1 --port 8000 --workers 1
-
-```
-
-This client-side implementation handles raw continuous audio recording, real-time chunk streaming over WebSocket, visual audio metering, and playback for synthesized responses.
-
-It uses standard Web APIs (`MediaRecorder`, `AudioContext`, and `WebSocket`) with no external dependencies.
+- Synthesize **per sentence**, not per token (chunking = lower latency-to-first-audio, no
+  syllable-level stutter).
+- **Drop Edge TTS** (cloud — contradicts fully-local; rev. 1's fallback choice is out).
+- **CHECKPOINT:** verify before committing — does `pocket-tts` stream natively (chunked
+  generation with incremental PCM), or must we synthesize per sentence and flush? If it
+  does not stream, evaluate alternative CPU streaming engines.
 
 ---
 
-### `index.html`
+## 7. Agent bridge — the seam to pin FIRST
 
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Voice Pipeline Client</title>
-  <style>
-    :root {
-      --bg: #0f172a;
-      --card: #1e293b;
-      --accent: #3b82f6;
-      --danger: #ef4444;
-      --text: #f8fafc;
-      --text-dim: #94a3b8;
-    }
+Sentence-by-sentence speech requires the bridge to receive **reply tokens as they arrive**,
+not a fully-formed reply.
 
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-      margin: 0;
-    }
+**CHECKPOINTS (verify on the target machine before building):**
+1. `config.yaml` has `streaming: enabled: false` — determine exactly what it gates (chat
+   token streaming to the plugin/gateway RPC? session capture?) and whether the bridge needs
+   it on.
+2. Bridge transport: candidate doors — **:9119 dashboard API** (stable, remote-access,
+   unauthenticated API; CORS to verify) vs **gateway JSON-RPC via a pinned route** (desktop
+   backend port is random-per-boot — must be discovered, not assumed).
+3. Crash log shows the gateway restarting periodically → the bridge must **reconnect
+   cleanly** (backoff + session re-attach), never half-open.
 
-    .container {
-      background: var(--card);
-      padding: 2rem;
-      border-radius: 12px;
-      width: 100%;
-      max-width: 480px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-    }
-
-    h2 { margin-top: 0; font-weight: 600; }
-
-    .status-bar {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 0.875rem;
-      color: var(--text-dim);
-      margin-bottom: 1.5rem;
-    }
-
-    .dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #64748b;
-    }
-    .dot.connected { background: #22c55e; }
-    .dot.recording { background: var(--danger); animation: pulse 1s infinite; }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-
-    .controls {
-      display: flex;
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-    }
-
-    button {
-      flex: 1;
-      padding: 0.75rem;
-      border: none;
-      border-radius: 8px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s, transform 0.1s;
-    }
-    button:active { transform: scale(0.98); }
-
-    #btn-record { background: var(--accent); color: white; }
-    #btn-record.recording { background: var(--danger); }
-    #btn-record:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .meter-container {
-      height: 8px;
-      background: #334155;
-      border-radius: 4px;
-      overflow: hidden;
-      margin-bottom: 1.5rem;
-    }
-
-    .meter-bar {
-      height: 100%;
-      width: 0%;
-      background: #22c55e;
-      transition: width 0.05s ease-out;
-    }
-
-    .log-box {
-      background: #090d16;
-      border-radius: 6px;
-      padding: 0.75rem;
-      height: 160px;
-      overflow-y: auto;
-      font-family: monospace;
-      font-size: 0.8rem;
-      color: var(--text-dim);
-    }
-
-    .log-entry { margin-bottom: 0.25rem; }
-    .log-entry.in { color: #38bdf8; }
-    .log-entry.out { color: #a7f3d0; }
-    .log-entry.err { color: #f87171; }
-  </style>
-</head>
-<body>
-
-<div class="container">
-  <h2>Voice Agent</h2>
-  
-  <div class="status-bar">
-    <div id="status-dot" class="dot"></div>
-    <span id="status-text">Disconnected</span>
-  </div>
-
-  <div class="meter-container">
-    <div id="meter" class="meter-bar"></div>
-  </div>
-
-  <div class="controls">
-    <button id="btn-record" disabled>Start Talking</button>
-  </div>
-
-  <div id="log" class="log-box"></div>
-</div>
-
-<script src="app.js"></script>
-</body>
-</html>
-
-```
+The bridge must write into the **same persistent Lars session** the SESSIONS window shows —
+that single-session identity is what makes "nav away and back, state intact" free.
 
 ---
 
-### `app.js`
+## 8. Verified vs to-verify (honest ledger)
 
-```javascript
-class AudioCaptureClient {
-  constructor(wsUrl) {
-    this.wsUrl = wsUrl;
-    this.ws = null;
-    this.mediaRecorder = null;
-    this.audioContext = null;
-    this.analyser = null;
-    this.animFrameId = null;
-    this.isRecording = false;
+**Known-good (do not re-litigate):** constraint (no in-page STT/TTS/mic), AudioWorklet Int16
+capture, manual-buffer playback + interrupt refs, page owns mic, sherpa keyword-spotting for
+"hey lars" (custom keyword, no training — verify exact API at build), sherpa endpointing for
+the 600 ms silence rule, Origin + token on the WS, per-sentence local TTS, state machine with
+barge-in + conversation loop, single persistent session through the bridge.
 
-    // DOM Elements
-    this.btnRecord = document.getElementById('btn-record');
-    this.statusDot = document.getElementById('status-dot');
-    this.statusText = document.getElementById('status-text');
-    this.meterBar = document.getElementById('meter');
-    this.logContainer = document.getElementById('log');
-
-    this.initWebSocket();
-    this.bindEvents();
-  }
-
-  log(msg, type = 'info') {
-    const el = document.createElement('div');
-    el.className = `log-entry ${type}`;
-    el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-    this.logContainer.appendChild(el);
-    this.logContainer.scrollTop = this.logContainer.scrollHeight;
-  }
-
-  initWebSocket() {
-    this.ws = new WebSocket(this.wsUrl);
-    this.ws.binaryType = 'arraybuffer';
-
-    this.ws.onopen = () => {
-      this.statusDot.className = 'dot connected';
-      this.statusText.textContent = 'Connected';
-      this.btnRecord.disabled = false;
-      this.log('WebSocket connection opened');
-    };
-
-    this.ws.onclose = () => {
-      this.statusDot.className = 'dot';
-      this.statusText.textContent = 'Disconnected';
-      this.btnRecord.disabled = true;
-      this.log('WebSocket connection closed', 'err');
-      // Attempt reconnect after 3 seconds
-      setTimeout(() => this.initWebSocket(), 3000);
-    };
-
-    this.ws.onerror = (err) => {
-      this.log('WebSocket error occurred', 'err');
-    };
-
-    this.ws.onmessage = async (event) => {
-      if (typeof event.data === 'string') {
-        const payload = JSON.parse(event.data);
-        this.log(`Server JSON: ${JSON.stringify(payload)}`, 'in');
-      } else if (event.data instanceof ArrayBuffer) {
-        this.log(`Received Audio Chunk (${event.data.byteLength} bytes)`, 'in');
-        await this.playAudioChunk(event.data);
-      }
-    };
-  }
-
-  bindEvents() {
-    this.btnRecord.addEventListener('click', () => {
-      if (this.isRecording) {
-        this.stopRecording();
-      } else {
-        this.startRecording();
-      }
-    });
-  }
-
-  async startRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: 16000, // Matches standard STT model input expectations
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
-
-      // Setup Web Audio API for visual meter
-      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const source = this.audioContext.createMediaStreamSource(stream);
-      this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 64;
-      source.connect(this.analyser);
-      this.drawMeter();
-
-      // Setup MediaRecorder
-      // Priority mimeTypes: audio/webm;codecs=opus -> audio/ogg -> fallback
-      let options = {};
-      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-        options = { mimeType: 'audio/webm;codecs=opus' };
-      }
-
-      this.mediaRecorder = new MediaRecorder(stream, options);
-
-      // Stream binary PCM/Opus chunks every 100ms
-      this.mediaRecorder.ondataavailable = async (e) => {
-        if (e.data.size > 0 && this.ws.readyState === WebSocket.OPEN) {
-          const buffer = await e.data.arrayBuffer();
-          this.ws.send(buffer);
-          this.log(`Sent audio chunk (${buffer.byteLength} bytes)`, 'out');
-        }
-      };
-
-      this.mediaRecorder.start(100); // Timeslice: flush audio buffer every 100ms
-
-      this.isRecording = true;
-      this.btnRecord.textContent = 'Stop Talking';
-      this.btnRecord.className = 'recording';
-      this.statusDot.className = 'dot recording';
-      this.statusText.textContent = 'Streaming Audio...';
-      this.log('Mic recording started');
-
-    } catch (err) {
-      this.log(`Microphone Access Error: ${err.message}`, 'err');
-    }
-  }
-
-  stopRecording() {
-    if (!this.mediaRecorder) return;
-
-    this.mediaRecorder.stop();
-    this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
-
-    if (this.audioContext) {
-      this.audioContext.close();
-    }
-
-    cancelAnimationFrame(this.animFrameId);
-    this.meterBar.style.width = '0%';
-
-    this.isRecording = false;
-    this.btnRecord.textContent = 'Start Talking';
-    this.btnRecord.className = '';
-    this.statusDot.className = 'dot connected';
-    this.statusText.textContent = 'Connected';
-    this.log('Mic recording stopped');
-
-    // Send stop signal metadata frame
-    if (this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ event: 'EOS' })); // End of Stream
-    }
-  }
-
-  drawMeter() {
-    const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
-    const update = () => {
-      this.analyser.getByteFrequencyData(dataArray);
-      let sum = 0;
-      for (let i = 0; i < dataArray.length; i++) {
-        sum += dataArray[i];
-      }
-      const average = sum / dataArray.length;
-      const percentage = Math.min(100, Math.round((average / 128) * 100));
-      this.meterBar.style.width = `${percentage}%`;
-
-      if (this.isRecording) {
-        this.animFrameId = requestAnimationFrame(update);
-      }
-    };
-    update();
-  }
-
-  async playAudioChunk(arrayBuffer) {
-    if (!this.audioContext || this.audioContext.state === 'closed') {
-      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    }
-
-    try {
-      // Decodes audio data (e.g. WAV or raw PCM depending on server response structure)
-      const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-      const source = this.audioContext.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(this.audioContext.destination);
-      source.start(0);
-    } catch (err) {
-      this.log('Error decoding server audio chunk', 'err');
-    }
-  }
-}
-
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', () => {
-  // Update port or endpoint matching backend engine
-  window.client = new AudioCaptureClient('ws://localhost:8000/ws/audio');
-});
-
-```
+**Checkpoints (verify on the target machine):** Pocket-TTS native streaming; `streaming:
+enabled: false` semantics; bridge transport (:9119 CORS / gateway RPC route); gateway restart
+cadence vs bridge reconnect; exact sherpa KWS API; latency measured end-to-end after wiring.
 
 ---
 
-### Core Execution Flow
+## 9. Div 7 page integration
 
-1. **Connection Setup:** Initializes a persistent binary WebSocket connection to `ws://localhost:8000/ws/audio`.
-2. **Microphone Access:** Requests input access at $16\text{ kHz}$ mono with echo cancellation and noise suppression enabled.
-3. **Chunk Streaming:** Captures chunks via `MediaRecorder` every $100\text{ ms}$ and immediately emits raw `ArrayBuffer` payloads over the WebSocket pipe.
-4. **Volume Meter:** Utilizes `AnalyserNode` to drive an HTML5 progress bar matching voice activity.
-5. **Inbound Processing:** Handles inbound JSON control strings or binary PCM/WAV buffers via `AudioContext.decodeAudioData()` for direct browser output.
+- Orb idle = HOT_MIC (streaming, wake armed). Glow = LISTENING. Waveform = CAPTURING or
+  SPEAKING. Red flash + "interrupted" = barge-in.
+- Live transcripts render in the orb panel (user + Lars).
+- **"Open in Sessions"** button → `host.openSession` → core chat UI with native voice, same
+  conversation, state intact. Mic pauses while away; resumes on return.
+- Div page stays the surface for the voice loop; Sessions is the optional power view.
