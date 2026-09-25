@@ -1,32 +1,60 @@
 """Lars utilities backend — live machine stats for the Div 7 utilities rail.
 
-Mounted by the Hermes gateway under /api/plugins/lars (dashboard manifest
-declares "api": "plugin_api.py"). Imported ONLY when "lars" is in
-plugins.enabled in config.yaml (GHSA-mcfc-hp25-cjv7 boundary).
+Mounted by the Hermes gateway when the lars plugin is loaded (dashboard
+manifest declares "api": "plugin_api.py").
 
-Routes (psutil, all stdlib-safe fallbacks):
-  GET /stats -> cpu %, ram %, disk %, uptime, hostname, python version,
-                hermes version, gateway RSS
+Routes:
+  GET /stats -> {cpu_percent, ram_mb, hdd_mb, hermes, os, proc_uptime_s, lars_model}
 """
 
 from fastapi import APIRouter
 
 router = APIRouter()
 
-# Warm the psutil CPU counter at import: cpu_percent(interval=None) returns
-# 0.0 on the very first call after process start; seed it once here.
+# Prime cpu_percent() at import so first API call returns real data, not 0.0
 try:
     import psutil as _psutil
-
-    _psutil.cpu_percent(interval=None)
+    for _p in _psutil.process_iter(["pid", "name"]):
+        try:
+            _pn = (_p.info["name"] or "").lower()
+            if _pn == "hermes.exe" or _pn == "hermes":
+                _p.cpu_percent(interval=None)
+        except Exception:
+            pass
 except Exception:
     pass
+
+
+# Seed HDD cache at import so first /stats call isn't slow
+_home_size_cache = (0.0, 0)
+
+
+def _prime_cache():
+    import os
+    import time
+    home = os.path.expanduser(r"~\AppData\Local\hermes")
+    total = 0
+    try:
+        for dirpath, dirnames, files in os.walk(home):
+            for f in files:
+                try:
+                    total += os.path.getsize(os.path.join(dirpath, f))
+                except Exception:
+                    pass
+            if total > 10 * 2 ** 30:
+                break
+    except Exception:
+        pass
+    global _home_size_cache
+    _home_size_cache = (round(total / 2 ** 20, 1), time.time())
+
+
+_prime_cache()
 
 
 def _hermes_version() -> str:
     try:
         import importlib.metadata
-
         return importlib.metadata.version("hermes-agent")
     except Exception:
         return "?"
@@ -49,30 +77,84 @@ async def stats():
     try:
         import psutil
 
-        # Hermes gateway process (the one running this code)
-        proc = psutil.Process()
-        with proc.oneshot():
-            # CPU % of THIS process (interval=None = non-blocking, compare to last call)
-            cpu_pct = proc.cpu_percent(interval=None)
-            out["cpu_percent"] = round(cpu_pct or 0.0, 1)
-            # RSS of THIS process
-            mem = proc.memory_info()
-            out["ram_mb"] = round(mem.rss / 2**20, 1)
-            out["ram_percent_of_system"] = round(mem.rss / psutil.virtual_memory().total * 100, 2)
-            out["threads"] = proc.num_threads()
-            # Process uptime
-            out["proc_uptime_s"] = int(time.time() - proc.create_time())
-            # Disk: Hermes home directory usage
-            hermes_home = os.path.expanduser(r"~\AppData\Local\hermes")
-            if os.path.exists(hermes_home):
-                du = psutil.disk_usage(hermes_home)
-                out["disk_percent"] = round(du.percent, 1)
-                out["disk_used_gb"] = round(du.used / 2**30, 2)
-                out["disk_total_gb"] = round(du.total / 2**30, 1)
+        hermes_procs = []
+        for p in psutil.process_iter(["pid", "name", "cmdline", "exe"]):
+            try:
+                pinfo = p.info
+                name = (pinfo["name"] or "").lower()
+                if name == "hermes.exe" or name == "hermes":
+                    hermes_procs.append(p)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        out["hermes_proc_count"] = len(hermes_procs)
+
+        # RAM: sum RSS across all Hermes.exe, rounded
+        total_rss = 0
+        for p in hermes_procs:
+            try:
+                total_rss += p.memory_info().rss
+            except Exception:
+                pass
+        out["ram_mb"] = round(total_rss / 2 ** 20)
+
+        # CPU: sum across Hermes.exe, normalize by core count
+        cpu_count = psutil.cpu_count(logical=True) or 1
+        total_cpu = 0.0
+        for p in hermes_procs:
+            try:
+                total_cpu += p.cpu_percent(interval=None)
+            except Exception:
+                pass
+        out["cpu_percent"] = round(total_cpu / cpu_count, 1)
+
+        # Gateway process uptime
+        out["proc_uptime_s"] = int(time.time() - psutil.Process().create_time())
+
+        # HDD = Hermes install folder size (MB), cached 60s
+        out["hdd_mb"] = round(_get_home_size())
+
+        # Lars profile model: read from config file
+        try:
+            import yaml as _yaml
+            _p = os.path.expanduser(r"~\AppData\Local\hermes\profiles\lars\config.yaml")
+            if os.path.exists(_p):
+                _c = _yaml.safe_load(open(_p, encoding="utf-8")) or {}
+                _m = _c.get("model") or {}
+                if isinstance(_m, dict):
+                    out["lars_model"] = _m.get("default") or _m.get("model") or "?"
+                else:
+                    out["lars_model"] = str(_m)
             else:
-                out["disk_percent"] = 0.0
+                out["lars_model"] = "?"
+        except Exception:
+            out["lars_model"] = "?"
     except Exception as exc:
         out["ok"] = False
         out["error"] = str(exc)[:200]
 
     return out
+
+
+def _get_home_size():
+    import time
+    global _home_size_cache
+    now = time.time()
+    if now - _home_size_cache[1] < 60:
+        return _home_size_cache[0]
+
+    import os
+    home = os.path.expanduser(r"~\AppData\Local\hermes")
+    total = 0
+    try:
+        for dirpath, dirnames, files in os.walk(home):
+            for f in files:
+                try:
+                    total += os.path.getsize(os.path.join(dirpath, f))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    size_mb = round(total / 2 ** 20, 1)
+    _home_size_cache = (size_mb, now)
+    return size_mb

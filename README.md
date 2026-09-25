@@ -1,5 +1,9 @@
 # lars-hermes-theme
 
+> **Build 2026-09-25** — Titlebar utilities overhaul: live Hermes CPU/RAM/HDD via Python backend,
+> profile-specific model reading, standalone stats server on :9120 (mounted via gateway plugin API).
+> Active development on `machine-2`.
+
 The **Lars** platform UI for [Hermes Agent](https://github.com/NousResearch/hermes-agent) — AxiomLC's
 master agent command center, split into **Divisions** (Div 7 Master "Lars", plus Comms / Clients /
 Records / Production / Debug / Public).
@@ -60,12 +64,13 @@ You should now see:
   Blob URL, so no relative file references)
 - **JarvisMic** reactor (lower-right, floating: no border/background, pulse orb + waveform bars;
   graphic placeholder — real voice per Voice-AI-README.md)
-- **Titlebar ownership while on Div 7**: Lars chips replace the app's fixed titlebar clusters
-  (MOD/PRF/GW live from `host.state`; CPU/RAM/DISK/CRN are `β` placeholders until the revised
-  resource monitor lands)
+- **Titlebar ownership while on Div 7**: left slot shows Lars logo + name; right slot shows
+>  desktop params (`Lars model`, `Ver`, `OS`, `Gateway`, `Agents`, `Sessions`, `Uptime`)
+>  and resource use (`CPU`, `RAM`, `HDD`). Data fetched from gateway-mounted Python backend
+>  (`plugin_api.py`) on 5s poll.
 
-No Python backend is installed with the current plugin — the previous `plugin_api.py` utilities
-backend was removed pending the revised monitor (Utility-Monitor-README.md).
+The Python backend is at `plugins/lars/dashboard/plugin_api.py` — mounted by the gateway via
+dashboard manifest.json (`"api": "plugin_api.py"`), serving `/stats` for the titlebar chips.
 
 ---
 
@@ -77,11 +82,14 @@ lars-hermes-theme/
 │   ├── plugin.js                  # DESKTOP PLUGIN (primary) — copy to %LOCALAPPDATA%\hermes\desktop-plugins\lars\
 │   └── logo.png                   # Lars logo source (full-res; plugin embeds a downscaled data URI)
 ├── plugins/lars/
-│   ├── dashboard/                 # browser dashboard plugin (legacy, kept for no-conflict — NOT the UI)
+│   ├── dashboard/                 # browser dashboard plugin (legacy) + Python backend
 │   │   ├── manifest.json
+│   │   ├── plugin_api.py          # Python backend — serves /stats for titlebar chips
 │   │   └── dist/index.js
 │   └── theme/strike-freedom.yaml  # dashboard theme (legacy)
-├── specs/layout-master.md         # canonical page layout spec
+├── specs/
+│   ├── layout-master.md           # canonical page layout spec
+│   └── Hermes_Gateway.vbs         # gateway + stats server startup script
 ├── themes/hinokami-night.yaml     # desktop theme (dark)
 ├── themes/lars-yakuza.yaml        # desktop theme (light)
 ├── Voice-AI-README.md             # voice/mic build spec (rev 2) — agreed design
@@ -105,8 +113,9 @@ lars-hermes-theme/
 - **Resolver:** `/lars` restores `lastPage` from `ctx.storage` + per-page state (collapsed menu,
   expanded boxes, scroll position) — nav away and back keeps state
 - **Titlebar:** while Div 7 is up, mount-scoped `<Contribute>` into `titleBar.left`/`titleBar.right`
-  makes the page own the chrome — app clusters hide, Lars chips render (MOD/PRF/GW live + `β`
-  placeholders). Ownership leaves with the page.
+>  makes the page own the chrome — app clusters hide, Lars chips render. Left: logo + name.
+>  Right: desktop params (`Lars model`, `Ver`, `OS`, `Gateway`, `Agents`, `Sessions`, `Uptime`)
+>  + resources (`CPU`, `RAM`, `HDD`). Data via `pluginCtx.rest('/stats')` (gateway plugin API).
 - **Voice module:** `JarvisMic` — floating reactor graphic (no border/bg), EXPAND → core Session chat
   (native voice). Real voice per **Voice-AI-README.md**.
 - **Theme:** Jarvis palette (cyan `#40f3ff`, amber `#ffb648`, near-black `#02070c`, Chakra Petch +
@@ -116,6 +125,7 @@ lars-hermes-theme/
 | What | Port | Notes |
 |---|---|---|
 | Hermes browser dashboard | **:9119** | running — endpoints available there for whatever we need |
+| Hermes gateway (stats API) | **:8642** | gateway + plugin API mounted via dashboard manifest |
 | n8n (automation hub) | **:5678** | bare-metal |
 | PostgreSQL | **:5432** | local |
 | pgweb | **:8081** | reads `PGPASSWORD` from `.env` |
@@ -135,6 +145,14 @@ code .\desktop-plugins\lars\plugin.js
 # Syntax check, then sync to the live door:
 node --check .\desktop-plugins\lars\plugin.js
 Copy-Item .\desktop-plugins\lars\plugin.js "$env:LOCALAPPDATA\hermes\desktop-plugins\lars\plugin.js" -Force
+```
+
+### Edit the Python backend
+```powershell
+code .\plugins\lars\dashboard\plugin_api.py
+python -m py_compile .\plugins\lars\dashboard\plugin_api.py
+Copy-Item .\plugins\lars\dashboard\plugin_api.py "$env:LOCALAPPDATA\hermes\plugins\lars\dashboard\plugin_api.py" -Force
+# Restart gateway to pick up changes
 ```
 
 ### Sync to repo

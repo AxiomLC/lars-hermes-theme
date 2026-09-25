@@ -30,10 +30,11 @@
  * kept as graphic placeholder per plan.
  */
 
-import { atom, host, icons, Contribute, TITLEBAR_AREAS, PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, useValue } from '@hermes/plugin-sdk'
+import { atom, host, icons, Contribute, TITLEBAR_AREAS, PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, useQuery, useValue } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'lars' // must match the folder name
+let pluginCtx = null // set in register(); used by TitlebarUtils for ctx.rest
 
 // ── The 7 Divisions ──────────────────────────────────────────────────────────
 // `edge` = per-Div accent (thin glow on the menu chip).
@@ -206,52 +207,87 @@ function JarvisMic({ div }) {
   })
 }
 
-// ── Titlebar utilities (placeholder chips) ───────────────────────────────────
-// Mounted into the app titlebar via titleBar.left/right slots while a Lars page
-// is up — ownership kicks in (pageOwnsTitlebar) and the app's fixed clusters
-// hide. Placeholders only: revised family-wide resource monitor lands later.
+// ── Titlebar utilities (desktop params + resource use) ──────────────────────
+// Left: Profile, Model, Ver, OS, Gateway, Agents, Sessions, Uptime
+// Right: "Hermes Resource Use:" + CPU, RAM, HDD
+// No cron — user removed. 5s poll on sysstats.
+// Helpers for chip rendering
+function chip(label, value, accent) {
+  return jsxs('span', {
+    key: label,
+    style: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '3px',
+      padding: '1px 5px',
+      borderRadius: '3px',
+      border: `1px solid ${JV.edge}`,
+      background: 'rgba(2,7,12,0.55)'
+    },
+    children: [
+      jsx('span', { style: { color: JV.dim }, children: label }),
+      jsx('span', { style: { color: JV.cyan, textShadow: `0 0 5px ${JV.cyan}` }, children: value })
+    ]
+  })
+}
+
 function TitlebarUtils() {
   const model = useValue(host.state.model)
   const profile = useValue(host.state.profile)
   const gateway = useValue(host.state.gateway)
-  const chips = [
-    ['MOD', model || '—'],
-    ['PRF', profile || '—'],
-    ['GW', gateway === 'open' ? 'ON' : gateway || '…'],
-    ['CPU', 'β'],
-    ['RAM', 'β'],
-    ['DISK', 'β'],
-    ['CRN', 'β']
+
+  const sysQ = useQuery({
+    queryKey: ['lars-sysstats'],
+    queryFn: () => (pluginCtx ? pluginCtx.rest('/stats', { timeoutMs: 4000 }) : Promise.reject(new Error('no ctx'))),
+    refetchInterval: 5000,
+    retry: false
+  })
+  const sys = sysQ.data && sysQ.data.ok ? sysQ.data : null
+
+  // Extract OS short name from e.g. "Windows 10" → "Windows"
+  const osName = sys ? (sys.os || '').split(/\s/)[0] || sys.os : 'β'
+
+  const desktopChips = [
+    chip('Lars model', sys ? sys.lars_model : 'β'),
+    chip('Ver', sys ? sys.hermes : 'β'),
+    chip('OS', osName),
+    chip('Gateway', gateway === 'open' ? 'Connected' : gateway || '…'),
+    chip('Agents', '—'), // TODO: wire from host.request()
+    chip('Sessions', '—'), // TODO: wire from host.request()
+    chip('Uptime', sys ? `${sys.proc_uptime_s}s` : 'β')
   ]
+
+  const resourceChips = [
+    chip('CPU', sys ? `${sys.cpu_percent}%` : 'β'),
+    chip('RAM', sys ? `${Math.round(sys.ram_mb)}MB` : 'β'),
+    chip('HDD', sys ? `${Math.round(sys.hdd_mb)}MB` : 'β')
+  ]
+
   return jsxs('div', {
     style: {
       display: 'flex',
       alignItems: 'center',
-      gap: '6px',
+      justifyContent: 'space-between',
+      width: '100%',
       fontFamily: JV.mono,
       fontSize: '9px',
       color: JV.mut,
       letterSpacing: '0.05em',
       whiteSpace: 'nowrap'
     },
-    children: chips.map(c =>
-      jsxs('span', {
-        key: c[0],
-        style: {
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '3px',
-          padding: '1px 5px',
-          borderRadius: '3px',
-          border: `1px solid ${JV.edge}`,
-          background: 'rgba(2,7,12,0.55)'
-        },
+    children: [
+      jsx('div', {
+        style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'nowrap' },
+        children: desktopChips
+      }),
+      jsxs('div', {
+        style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'nowrap' },
         children: [
-          jsx('span', { style: { color: JV.dim }, children: c[0] }),
-          jsx('span', { style: { color: JV.cyan, textShadow: `0 0 5px ${JV.cyan}` }, children: c[1] })
+          jsx('span', { style: { color: JV.dim, fontSize: '9px', marginRight: '3px' }, children: 'Resources:' }),
+          ...resourceChips
         ]
       })
-    )
+    ]
   })
 }
 
@@ -355,17 +391,19 @@ function LarsPage({ collapsedAtom, expandedAtom, activePath, div, store }) {
   const micModule = jsx(JarvisMic, { div })
 
   // Own the app titlebar while Div 7 is up: contribution into titleBar slots
-  // makes pageOwnsTitlebar true → the app's fixed clusters hide, ours render.
-  // Mount-scoped via <Contribute> — leaves with the page.
-  const titlebarChrome = isHome
-    ? jsxs('div', {
-        key: 'titlebar',
-        children: [
-          jsx(Contribute, { area: TITLEBAR_AREAS.left, id: 'lars:titlebar-utils-left', children: jsx(TitlebarUtils, {}) }),
-          jsx(Contribute, { area: TITLEBAR_AREAS.right, id: 'lars:titlebar-utils-right', children: jsx(TitlebarUtils, {}) })
-        ]
-      })
-    : null
+    // makes pageOwnsTitlebar true → the app's fixed clusters hide, ours render.
+    // Mount-scoped via <Contribute> — leaves with the page.
+    const titlebarChrome = isHome
+      ? jsxs('div', { key: 'titlebar', children: [
+          jsx(Contribute, { area: TITLEBAR_AREAS.left, id: 'lars:titlebar-brand', children:
+            jsx('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' }, children: [
+              jsx('img', { src: LOGO_DATA, alt: 'Lars', style: { height: '30px', width: 'auto', objectFit: 'contain' } }),
+              jsx('span', { style: { fontSize: '13px', fontWeight: '700', color: 'var(--ui-text-primary)', letterSpacing: '0.08em' }, children: 'Lars' })
+            ]})
+          }),
+          jsx(Contribute, { area: TITLEBAR_AREAS.right, id: 'lars:titlebar-utils', children: jsx(TitlebarUtils, {}) })
+        ]})
+      : null
 
   return jsxs('div', {
     key: 'page',
@@ -387,7 +425,7 @@ function LarsPage({ collapsedAtom, expandedAtom, activePath, div, store }) {
           flexDirection: 'column',
           gap: '10px'
         },
-        children: [brand, toggleBtn, ...menuItems]
+        children: [toggleBtn, ...menuItems]
       }),
       // Content region.
       jsx('div', {
@@ -447,6 +485,7 @@ export default {
   description: 'Lars platform — Executive Div 7 home + 6 Division pages, shared states.',
   defaultEnabled: true,
   register(ctx) {
+    pluginCtx = ctx
     // Collapse state: one atom for the whole plugin, seeded from storage.
     const collapsedAtom = atom(ctx.storage.get('menuCollapsed', false))
     collapsedAtom.listen(v => ctx.storage.set('menuCollapsed', v))
