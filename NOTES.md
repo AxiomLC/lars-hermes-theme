@@ -163,3 +163,19 @@ Whole-Hermes process family (gateway + Electron + dashboard + subagents), NOT on
 Our plan: extend plugin_api.py with psutil process_iter family scan (backend-side), telemetry
 via SDK atoms (host.status / cron.manage / host.state) + :9119 where it makes sense
 (remote/Cloudflare door). CORS on :9119 from the desktop renderer = verify.
+
+---
+
+## File locations (current build 2026-09-26)
+
+The repo IS the live install. No copy step.
+
+| What | Local path | Git path |
+|------|-----------|----------|
+| Desktop plugin | `%LOCALAPPDATA%\hermes\desktop-plugins\lars\plugin.js` | `plugin.js` (repo root) |
+| Python backend | `%LOCALAPPDATA%\hermes\plugins\lars\dashboard\` (junction → repo) | `plugins/lars/dashboard/plugin_api.py` |
+| Docs, themes, specs | `%LOCALAPPDATA%\hermes\desktop-plugins\lars\` | `README.md`, `themes/`, `specs/`, etc. |
+
+**Junction:** `%LOCALAPPDATA%\hermes\plugins\lars\dashboard\` is a directory junction to `%LOCALAPPDATA%\hermes\desktop-plugins\lars\plugins\lars\dashboard\` — same files on disk.
+
+**Git:** `origin machine-2` branch. Push from the live door: `%LOCALAPPDATA%\hermes\desktop-plugins\lars\`.
