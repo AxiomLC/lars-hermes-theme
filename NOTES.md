@@ -6,6 +6,54 @@ when a decision changes.
 
 ---
 
+## Voice build state — 2026-09-27 (in progress, handoff note)
+
+**Proven & verified (do not re-test):**
+- **pocket-tts 3.3.0 streams natively** — see Voice-AI-README.md §6 (RESOLVED entry).
+- **Bridge transport VERIFIED END-TO-END, raw protocol:** dashboard on :9119 must be launched
+  with `HERMES_DASHBOARD_SESSION_TOKEN=lars-voice-bridge-2026` (we relaunched it that way).
+  Then: WS `ws://127.0.0.1:9119/api/ws?token=<that token>` speaks gateway JSON-RPC verbatim
+  (`tui_gateway.ws.handle_ws`). Sequence: `session.most_recent{profile:'lars'}` →
+  `session.resume{session_id, profile}` → **use the LIVE session_id from the resume result**
+  for `prompt.submit{session_id, profile, text, surface:'voice'}` → `{status:'streaming'}` →
+  events arrive as notifications `{method:'event', params:{type:…}}`:
+  `message.delta` (speak these) / `message.complete{payload.text}` (turn over) /
+  `reasoning.delta` + `thinking.delta` (ignore). Raw test round trip ≈ 5 s; reply verified
+  persisted in the lars profile's `state.db`. RPC contract = `apps/shared/src/gateway-contract.openrpc.json`.
+- sherpa-onnx 1.13.4 already in the venv; STT/wake/VAD models still need downloading.
+- Gateway RPC also has `session.interrupt` (barge-in) and `session.events.since` (replay).
+
+**Built:**
+- `voice/agent_bridge.py` — LarsBridge wrapper (persistent WS thread, auto resume/create,
+  delta/done callbacks, interrupt, resume-retry on aged-out live session).
+
+**STUCK (known bug, next step):** the raw protocol works every time, but the LarsBridge
+wrapper hangs in the turn-drain after `prompt.submit` — deltas never reach the callbacks
+(rpc responses do resolve). Debug `_reader()`/`_turn_futs` plumbing in agent_bridge.py.
+Then: voice_server.py (:8000, state machine per Voice-AI-README §2), sherpa models,
+plugin-side mic hookup (TALK button → WS to :8000; stateAtom drives deaf/hot/user/lars).
+
+---
+
+## Design decisions — 2026-09-27 (voice module, Div 7)
+
+- **Profile: Lars only.** agent_bridge targets the `lars` profile's persistent session; no
+  profile routing in v1. (Profile toggle = v2.)
+- **Floating mic: WITHIN OUR 7 PAGES ONLY.** Plugin mounts are mount-scoped — no SDK area
+  renders above core app pages, so the mic unmounts on core pages (SESSIONS etc.). That's
+  accepted: leaving to native chat = handover per point 3; mic pauses, resumes on return.
+- **Module design:** rendered once at Lars shell level (outside per-page content) → floats
+  over all 7 Div pages, survives their nav. `position: fixed`, high z-index.
+  - **Position draggable** (pointer-drag, x/y in ctx.storage). **Size: two presets**
+    (small orb / panel) via toggle — NOT draggable-size (more edge cases, no value).
+  - **Chat panel toggle:** scrollbox of user+Lars transcript + text entry box → same
+    bridge/session, typed and spoken turns share one history. Toggle back = voice-only orb.
+- **Expand to native:** toggle button opens THAT profile's session in the native Hermes
+  desktop chat window (`host.openSession`). State persists; on return to plugin pages the
+  mic/chat resume with full recent memory (shared persistent session = the seam, §7 #2).
+
+---
+
 ## Confirmed direction (as of 2026-09-24)
 
 - **Lars runs as a desktop plugin SDK build** in the Hermes **Electron desktop app**. That's the
@@ -163,3 +211,19 @@ Whole-Hermes process family (gateway + Electron + dashboard + subagents), NOT on
 Our plan: extend plugin_api.py with psutil process_iter family scan (backend-side), telemetry
 via SDK atoms (host.status / cron.manage / host.state) + :9119 where it makes sense
 (remote/Cloudflare door). CORS on :9119 from the desktop renderer = verify.
+
+---
+
+## File locations (current build 2026-09-26)
+
+The repo IS the live install. No copy step.
+
+| What | Local path | Git path |
+|------|-----------|----------|
+| Desktop plugin | `%LOCALAPPDATA%\hermes\desktop-plugins\lars\plugin.js` | `plugin.js` (repo root) |
+| Python backend | `%LOCALAPPDATA%\hermes\plugins\lars\dashboard\` (junction → repo) | `plugins/lars/dashboard/plugin_api.py` |
+| Docs, themes, specs | `%LOCALAPPDATA%\hermes\desktop-plugins\lars\` | `README.md`, `themes/`, `specs/`, etc. |
+
+**Junction:** `%LOCALAPPDATA%\hermes\plugins\lars\dashboard\` is a directory junction to `%LOCALAPPDATA%\hermes\desktop-plugins\lars\plugins\lars\dashboard\` — same files on disk.
+
+**Git:** `origin machine-2` branch. Push from the live door: `%LOCALAPPDATA%\hermes\desktop-plugins\lars\`.
