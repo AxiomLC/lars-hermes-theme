@@ -41,10 +41,10 @@ let pluginCtx = null // set in register(); used by TitlebarUtils for ctx.rest
 const DIVS = [
   { num: '7', label: 'Div 7 Exec', path: '/lars', placeholder: 'Div 7', edge: '#2563eb' }, // dark blue
   { num: '1', label: 'Div 1 Comms', path: '/lars-comms', placeholder: 'Div 1', edge: '#d4a017' }, // gold
-  { num: '2', label: 'Div 2 Clients', path: '/lars-clients', placeholder: 'Div 2', edge: '#64748b' }, // slate
+  { num: '2', label: 'Div 2 Clients', path: '/lars-clients', placeholder: 'Div 2', edge: '#a855f7' }, // violet
   { num: '3', label: 'Div 3 Records', path: '/lars-records', placeholder: 'Div 3', edge: '#ec4899' }, // pink
   { num: '4', label: 'Div 4 Code Prod', path: '/lars-production', placeholder: 'Div 4', edge: '#22c55e' }, // green
-  { num: '5', label: 'Div 5 Debug', path: '/lars-debug', placeholder: 'Div 5', edge: '#a855f7' }, // violet
+  { num: '5', label: 'Div 5 Debug', path: '/lars-debug', placeholder: 'Div 5', edge: '#64748b' }, // slate
   { num: '6', label: 'Div 6 CRM', path: '/lars-crm', placeholder: 'Div 6', edge: '#eab308' } // yellow
 ]
 
@@ -93,115 +93,228 @@ const JV = {
 // this is allowed. PLACEHOLDER: orb/waveform will be driven by the local voice
 // service per Voice-AI-README.md (rev 2) once built — AudioWorklet PCM capture,
 // WebSocket to :8000, streamed TTS playback. EXPAND → core Hermes session chat.
-function JarvisMic({ div }) {
+// Icon buttons — inline SVG (no SDK icon import risk), borderless per spec.
+// +30% (2026-09-27): mic 16→21, kbd 17→22. MicIcon takes `on` → green tint.
+function MicIcon({ on }) {
+  const c = on ? JV.green : JV.mut
+  return jsxs('svg', {
+    width: '21', height: '21', viewBox: '0 0 24 24',
+    style: on ? { filter: `drop-shadow(0 0 4px ${JV.green})` } : undefined,
+    children: [
+      jsx('rect', { x: '9', y: '3', width: '6', height: '11', rx: '3', fill: c }),
+      jsx('path', { d: 'M5 11a7 7 0 0 0 14 0', stroke: c, strokeWidth: '1.6', fill: 'none', strokeLinecap: 'round' }),
+      jsx('line', { x1: '12', y1: '18', x2: '12', y2: '21', stroke: c, strokeWidth: '1.6', strokeLinecap: 'round' })
+    ]
+  })
+}
+
+function KbdIcon() {
+  return jsxs('svg', {
+    width: '22', height: '22', viewBox: '0 0 24 24',
+    children: [
+      jsx('rect', { x: '2', y: '6', width: '20', height: '12', rx: '2', fill: 'none', stroke: JV.mut, strokeWidth: '1.5' }),
+      jsx('line', { x1: '6', y1: '10', x2: '6', y2: '10', stroke: JV.mut, strokeWidth: '2', strokeLinecap: 'round' }),
+      jsx('line', { x1: '10', y1: '10', x2: '10', y2: '10', stroke: JV.mut, strokeWidth: '2', strokeLinecap: 'round' }),
+      jsx('line', { x1: '14', y1: '10', x2: '14', y2: '10', stroke: JV.mut, strokeWidth: '2', strokeLinecap: 'round' }),
+      jsx('line', { x1: '18', y1: '10', x2: '18', y2: '10', stroke: JV.mut, strokeWidth: '2', strokeLinecap: 'round' }),
+      jsx('line', { x1: '7', y1: '14', x2: '17', y2: '14', stroke: JV.mut, strokeWidth: '1.6', strokeLinecap: 'round' })
+    ]
+  })
+}
+
+function JarvisMic({ posAtom, panelAtom, stateAtom }) {
   const micCSS =
     '@keyframes ljSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}' +
     '@keyframes ljReverse{from{transform:rotate(0)}to{transform:rotate(-360deg)}}' +
-    '@keyframes ljOrbPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}' +
-    '@keyframes ljBlink{0%,100%{opacity:.22}50%{opacity:1}}' +
-    '@keyframes ljWave{0%,100%{height:22%}30%{height:78%}60%{height:46%}80%{height:92%}}'
+    '@keyframes ljOrbPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}'
 
-  // 7 waveform bars, each with its own staggered animation delay.
-  const bars = [0, 2, 4, 6, 8, 10, 12].map(d =>
-    jsx('span', {
-      key: d,
-      style: {
-        width: '2px',
-        borderRadius: '1px',
-        background: JV.cyan,
-        boxShadow: `0 0 5px ${JV.cyan}`,
-        animation: `ljWave 1.1s ease-in-out infinite`,
-        animationDelay: `${d * 0.09}s`,
-        transformOrigin: 'bottom',
-        display: 'inline-block'
-      }
-    })
-  )
+  const pos = useValue(posAtom)
+  const panel = useValue(panelAtom)
+  // Voice state: 'deaf' (off — only "Hey Lars" wakes) | 'hot' (hot mic) |
+  // 'user' (mic hears the user → green glow) | 'lars' (Lars speaking →
+  // dark-purple glow). The voice service sets this once wired; TALK toggles
+  // deaf↔hot for now.
+  const vstate = useValue(stateAtom)
+  const hot = vstate === 'hot' || vstate === 'user' || vstate === 'lars'
 
-  const wavePanel = jsxs('div', {
-    key: 'wave',
-    style: {
-      display: 'flex',
-      alignItems: 'flex-end',
-      gap: '2px',
-      height: '14px',
-      width: '34px',
-      justifyContent: 'center'
+  // Glow per state (2026-09-27): user talking → green, Lars talking → dark
+  // purple, off/hot-listening → plain (the green tint lives on the mic icon).
+  const glow =
+    vstate === 'user' ? `0 0 30px ${JV.green}77`
+    : vstate === 'lars' ? `0 0 30px ${JV.violet}88`
+    : `0 0 24px ${JV.cyan}22`
+
+  // Cosmetics 2026-09-27 (NOTES.md): bars removed, outer solid ring removed,
+  // ring speeds -50%, core = dark purple/black, graphic +30% (53→69px).
+  // Module: position:fixed + zIndex 9999 (floats over page items, layout-inert),
+  // rendered on EVERY custom page (persists across Div nav), draggable orb
+  // (position stored), TYPE toggles a 25vw panel (transcript + entry box).
+
+  const orbDrag = {
+    // Pointer-drag via element capture (no hooks — state rides on the DOM node,
+    // same pattern as the scroll persistence below).
+    onPointerDown: e => {
+      const el = e.currentTarget
+      const rect = el.getBoundingClientRect()
+      el._drag = { px: e.clientX, py: e.clientY, x: rect.left, y: rect.top }
+      el.setPointerCapture(e.pointerId)
     },
-    children: bars
+    onPointerMove: e => {
+      const el = e.currentTarget
+      const d = el._drag
+      if (!d) return
+      const nx = d.x + (e.clientX - d.px)
+      const ny = d.y + (e.clientY - d.py)
+      posAtom.set({
+        x: Math.max(4, Math.min(window.innerWidth - 120, nx)),
+        y: Math.max(4, Math.min(window.innerHeight - 60, ny))
+      })
+    },
+    onPointerUp: e => { delete e.currentTarget._drag },
+    style: { cursor: 'grab', touchAction: 'none' }
+  }
+
+  const iconBtn = {
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    padding: '4px',
+    display: 'inline-flex',
+    alignItems: 'center'
+  }
+
+  // Panel mode: 25% of the custom-page width (viewport-based — the page content
+  // area is flex, so 25vw tracks it without touching layout of other items).
+  const transcript = jsxs('div', {
+    style: {
+      flex: 1,
+      width: '100%',
+      overflowY: 'auto',
+      border: `1px solid ${JV.edge}`,
+      borderRadius: '6px',
+      background: 'rgba(2,7,12,0.55)',
+      padding: '8px',
+      fontSize: '11px',
+      color: JV.mut
+    },
+    children: 'Voice core not wired yet — transcript will show here.'
+  })
+
+  const typeBox = jsx('input', {
+    type: 'text',
+    placeholder: 'Type to Lars…',
+    style: {
+      width: '100%',
+      background: 'rgba(2,7,12,0.55)',
+      border: `1px solid ${JV.edge}`,
+      borderRadius: '6px',
+      color: JV.ink,
+      fontSize: '11px',
+      fontFamily: JV.mono,
+      padding: '6px 8px',
+      outline: 'none'
+    }
   })
 
   return jsxs('div', {
     key: 'mic',
     style: {
-      position: 'absolute',
-      right: '14px',
-      bottom: '14px',
-      width: '110px',
-      height: '132px',
-      // Floating: no panel bg, no border — just the cyan glow.
+      position: 'fixed',
+      ...(pos ? { left: pos.x + 'px', top: pos.y + 'px' } : { right: '14px', bottom: '14px' }),
+      width: panel ? '25vw' : '112px',
+      height: panel ? '55vh' : '150px',
       background: 'transparent',
       border: 'none',
       borderRadius: '12px',
-      boxShadow: `0 0 24px ${JV.cyan}22`,
+            boxShadow: glow,
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
       padding: '8px',
       fontFamily: JV.mono,
-      cursor: 'pointer',
-      zIndex: 2
+      zIndex: 9999
     },
     children: [
       jsx('style', { children: micCSS }),
-      // Reactor: two counter-rotating dashed rings around a pulsing orb.
-      jsxs('svg', {
-        width: '53',
-        height: '53',
-        viewBox: '0 0 44 44',
+      // Reactor: two counter-rotating dashed rings around a dark core. DRAG HANDLE.
+      jsxs('div', { ...orbDrag, children: [
+        jsxs('svg', {
+          width: '69',
+          height: '69',
+          viewBox: '0 0 44 44',
+          children: [
+            jsx('circle', {
+              cx: '22', cy: '22', r: '15',
+              fill: 'none', stroke: JV.cyan, strokeWidth: '1.2',
+              strokeDasharray: '2 4',
+              style: { transformOrigin: '22px 22px', animation: 'ljSpin 12s linear infinite' }
+            }),
+            jsx('circle', {
+              cx: '22', cy: '22', r: '11',
+              fill: 'none', stroke: JV.amber, strokeWidth: '1',
+              strokeDasharray: '1.4 3.4',
+              style: { transformOrigin: '22px 22px', animation: 'ljReverse 8.8s linear infinite' }
+            }),
+            // Delete the thin light-purple border ring (2026-09-27): core is a single
+                        // solid dark purple/black disc.
+                        jsx('circle', {
+                          cx: '22', cy: '22', r: '6.4',
+                          fill: '#160a24',
+                          style: { transformOrigin: '22px 22px', animation: 'ljOrbPulse 2.6s ease-in-out infinite' }
+                        })
+          ]
+        })
+      ] }),
+      jsx('div', { style: { fontSize: '10px', color: JV.ink, textShadow: `0 0 6px ${JV.cyan}` }, children: 'Lars' }),
+      // Mic + keyboard icon buttons (borderless, row).
+      jsxs('div', {
+        style: { display: 'flex', gap: '10px', marginTop: '2px', alignItems: 'center' },
         children: [
-          jsx('circle', { cx: '22', cy: '22', r: '19', fill: 'none', stroke: JV.edge, strokeWidth: '1' }),
-          jsx('circle', {
-            cx: '22', cy: '22', r: '15',
-            fill: 'none', stroke: JV.cyan, strokeWidth: '1.2',
-            strokeDasharray: '2 4',
-            style: { transformOrigin: '22px 22px', animation: 'ljSpin 6s linear infinite' }
-          }),
-          jsx('circle', {
-            cx: '22', cy: '22', r: '11',
-            fill: 'none', stroke: JV.amber, strokeWidth: '1',
-            strokeDasharray: '1.4 3.4',
-            style: { transformOrigin: '22px 22px', animation: 'ljReverse 4.4s linear infinite' }
-          }),
-          jsx('circle', {
-            cx: '22', cy: '22', r: '6.4',
-            fill: JV.cyan,
-            style: { transformOrigin: '22px 22px', animation: 'ljOrbPulse 2.6s ease-in-out infinite' }
-          }),
-          jsx('circle', { cx: '22', cy: '22', r: '5.2', fill: 'none', stroke: JV.ink, strokeWidth: '1' })
+          jsx('button', {
+                      type: 'button',
+                      title: 'Talk — toggle hot mic (60 s listening window; off = deaf until "Hey Lars")',
+                      onClick: () => stateAtom.set(vstate === 'deaf' ? 'hot' : 'deaf'),
+                      style: iconBtn,
+                      children: jsx(MicIcon, { on: hot })
+                    }),
+          jsx('button', {
+            type: 'button',
+            title: 'Type — toggle chat panel (25% width)',
+            onClick: () => panelAtom.set(!panel),
+            style: iconBtn,
+            children: jsx(KbdIcon, {})
+          })
         ]
       }),
-      jsx('div', { style: { fontSize: '10px', color: JV.ink, textShadow: `0 0 6px ${JV.cyan}` }, children: 'Lars' }),
-      wavePanel,
+      // Panel content (TYPE mode): transcript + entry box.
+      panel
+        ? jsxs('div', {
+            style: { display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', flex: 1, marginTop: '6px', minHeight: 0 },
+            children: [transcript, typeBox]
+          })
+        : null,
+      // CORE button sits beneath, in Hermes branding font (system-ui until we
+      // pin the exact brand face).
       jsx('button', {
         type: 'button',
-        title: 'Open full chat with Lars in the core session window (native voice)',
+        title: 'Hermes — open Lars session in the native Hermes desktop chat (state persists)',
         onClick: () => {
           const sess = host.state.focusedStoredSessionId ? host.state.focusedStoredSessionId.get() : null
           if (sess) host.openSession(sess)
           else host.navigate('/')
         },
         style: {
-          background: 'transparent',
-          border: `1px solid ${JV.edge}`,
-          borderRadius: '3px',
-          color: JV.mut,
-          fontSize: '8px',
-          letterSpacing: '0.06em',
-          cursor: 'pointer',
-          padding: '1px 6px'
-        },
-        children: 'EXPAND'
+                  background: 'transparent',
+                  border: 'none',
+                  borderRadius: '3px',
+                  color: JV.ink,
+                  fontSize: '10px',
+                  textShadow: `0 0 6px ${JV.cyan}`,
+                  cursor: 'pointer',
+                  padding: '2px 6px',
+                  marginTop: '4px'
+                },
+                children: 'Hermes'
       })
     ]
   })
@@ -294,7 +407,7 @@ function TitlebarUtils() {
 // ── Shared page chrome ───────────────────────────────────────────────────────
 // Atoms are created ONCE in register() and passed in — never inside the
 // component (a fresh atom per render would reset state on every keystroke).
-function LarsPage({ collapsedAtom, expandedAtom, activePath, div, store }) {
+function LarsPage({ collapsedAtom, expandedAtom, posAtom, panelAtom, stateAtom, activePath, div, store }) {
   const collapsed = useValue(collapsedAtom)
   const expanded = useValue(expandedAtom)
   let scrollEl = null
@@ -385,10 +498,9 @@ function LarsPage({ collapsedAtom, expandedAtom, activePath, div, store }) {
     ]
   })
 
-  // Voice/mic module (Div 7): Jarvis-style dynamic reactor graphic.
-  // Graphic + animation only for now — real STT/TTS wiring per
-  // Voice-AI-README.md (rev 2). Expand → core Hermes session chat.
-  const micModule = jsx(JarvisMic, { div })
+  // Voice/mic module: floats on EVERY custom page (fixed overlay, persists
+      // across Div nav). Lars shell level.
+      const micModule = jsx(JarvisMic, { posAtom, panelAtom, stateAtom })
 
   // Own the app titlebar while Div 7 is up: contribution into titleBar slots
     // makes pageOwnsTitlebar true → the app's fixed clusters hide, ours render.
@@ -472,8 +584,8 @@ function LarsPage({ collapsedAtom, expandedAtom, activePath, div, store }) {
             : [jsx('div', { style: { color: 'var(--ui-text-secondary)', fontSize: '14px' }, children: div.placeholder })]
         })
       }),
-      // Div 7 extra layer: mic (bottom-right).
-      isHome ? micModule : null
+      // Div 7 extra layer: mic — floats on EVERY custom page now.
+            micModule
     ]
   })
 }
@@ -501,7 +613,15 @@ export default {
         ctx.storage.set(`pageState.${div.path}`, cur)
       })
       expandedAtoms[div.path] = a
-    }
+          }
+
+          // Mic module: draggable position + TYPE panel toggle (persisted).
+          const posAtom = atom(ctx.storage.get('micPos', null))
+          posAtom.listen(v => ctx.storage.set('micPos', v))
+          const panelAtom = atom(ctx.storage.get('micPanel', false))
+              panelAtom.listen(v => ctx.storage.set('micPanel', v))
+              // Voice state — NOT persisted (a reload = deaf, wake re-arms via "Hey Lars").
+              const stateAtom = atom('deaf')
 
     // Sidebar nav row "next to Kanban" (order 50). /lars is a RESOLVER: it
     // renders the last-visited page instead of a fixed home.
@@ -536,9 +656,12 @@ export default {
           const active = isResolver ? ctx.storage.get('lastPage', '/lars') : div.path
           const resolved = DIVS.find(d => d.path === active) ?? div
           return jsx(LarsPage, {
-            collapsedAtom,
-            expandedAtom: expandedAtoms[resolved.path],
-            activePath: resolved.path,
+                      collapsedAtom,
+                      expandedAtom: expandedAtoms[resolved.path],
+                      posAtom,
+                                  panelAtom,
+                                  stateAtom,
+                      activePath: resolved.path,
             div: resolved,
             store: ctx.storage
           })

@@ -162,9 +162,15 @@ the page by the plugin (not stored in the page bundle).
 - Synthesize **per sentence**, not per token (chunking = lower latency-to-first-audio, no
   syllable-level stutter).
 - **Drop Edge TTS** (cloud — contradicts fully-local; rev. 1's fallback choice is out).
-- **CHECKPOINT:** verify before committing — does `pocket-tts` stream natively (chunked
-  generation with incremental PCM), or must we synthesize per sentence and flush? If it
-  does not stream, evaluate alternative CPU streaming engines.
+- **RESOLVED 2026-09-27: pocket-tts 3.3.0 VERIFIED streaming.** `TTSModel.generate_audio_stream(state, text)`
+  yields PCM chunks incrementally on CPU. Measured (machine-2, `english_2026-09`, voice `alba`,
+  24 kHz): **time-to-first-chunk 0.43 s**, 4.6 s of audio generated in 3.23 s (faster than
+  realtime), 58 chunks, clean waveform (peak 0.91). Bonus: the stream is **stateful**
+  (`model_state` carried chunk-to-chunk — state persists across sentences, perfect for the
+  per-sentence pipeline) and takes a **`stop: threading.Event`** — barge-in cancel is built in.
+  Notes: language key must be a catalog name (`english_2026-09`, not `en`); voice state via
+  `get_state_for_audio_prompt('alba')` — 27 catalog voices, no voice cloning (that model needs
+  gated HF weights). No per-sentence flush workaround needed.
 
 ---
 
@@ -199,6 +205,18 @@ barge-in + conversation loop, single persistent session through the bridge.
 **Checkpoints (verify on the target machine):** Pocket-TTS native streaming; `streaming:
 enabled: false` semantics; bridge transport (:9119 CORS / gateway RPC route); gateway restart
 cadence vs bridge reconnect; exact sherpa KWS API; latency measured end-to-end after wiring.
+
+**RESOLVED 2026-09-27 (machine-2) — bridge transport:**
+- Transport = dashboard `/api/ws` (relays gateway JSON-RPC verbatim). Launch the :9119
+  dashboard with `HERMES_DASHBOARD_SESSION_TOKEN=lars-voice-bridge-2026`, connect
+  `ws://127.0.0.1:9119/api/ws?token=<same>`. (ws-ticket path 401s — gated-mode only.)
+- Handshake: `session.most_recent{profile:'lars'}` → `session.resume` → **submit with the
+  LIVE session_id from the resume result** (stored id → error 4001 "session not found").
+- `prompt.submit{..., surface:'voice'}` → `{status:'streaming'}` → `message.delta` /
+  `message.complete{payload.text}` notifications (ignore `reasoning.delta`/`thinking.delta`).
+- `streaming: enabled: false` is display-only — not a blocker.
+- Live sessions age out; `session.resume` rebuilds (~0.2 s). `session.interrupt` = barge-in.
+- Full details + wrapper status: NOTES.md "Voice build state 2026-09-27".
 
 ---
 
