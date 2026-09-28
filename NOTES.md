@@ -27,9 +27,13 @@ when a decision changes.
 - `voice/agent_bridge.py` — LarsBridge wrapper (persistent WS thread, auto resume/create,
   delta/done callbacks, interrupt, resume-retry on aged-out live session).
 
-**STUCK (known bug, next step):** the raw protocol works every time, but the LarsBridge
-wrapper hangs in the turn-drain after `prompt.submit` — deltas never reach the callbacks
-(rpc responses do resolve). Debug `_reader()`/`_turn_futs` plumbing in agent_bridge.py.
+**STUCK (known bug, next step):** RESOLVED 2026-09-28 — the turn drain hung because each
+turn used a one-shot Future: `set_result` captured only the FIRST delta, and every later
+await on the done future instantly replayed that same event, so `message.complete` never
+surfaced. Fix: per-turn `asyncio.Queue` (`_turn_queues`) in agent_bridge.py; reader pushes
+each delta/complete into every active turn queue, drain pops until complete. Also learned:
+**`message.complete` carries the FULL cumulative reply** (not incremental) — drain only
+uses it if no deltas streamed. on_delta now actually fires. Verified round trip OK.
 Then: voice_server.py (:8000, state machine per Voice-AI-README §2), sherpa models,
 plugin-side mic hookup (TALK button → WS to :8000; stateAtom drives deaf/hot/user/lars).
 

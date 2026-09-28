@@ -52,7 +52,7 @@ class LarsBridge:
         self._rid = 0
         self._pending: dict[int, asyncio.Future] = {}
         self.session_id: Optional[str] = None
-        self._turn_futs: list[asyncio.Future] = []  # resolvers for the current turn
+        self._turn_queues: list[asyncio.Queue] = []  # per-turn event queues
         self._thread.start()
         # attach happens asynchronously; callers wait on wait_ready()
         fut = asyncio.run_coroutine_threadsafe(self._attach(), self._loop)
@@ -97,20 +97,22 @@ class LarsBridge:
                     self._pending.pop(rid).set_result(frame)
                     continue
                 if frame.get("method") != "event":
+                    log.debug("non-event frame: %s", json.dumps(frame)[:200])
                     continue
                 ev = frame.get("params") or {}
                 if ev.get("session_id") not in (None, "", self.session_id):
                     continue
                 etype = ev.get("type", "")
+                log.debug("reader ev: sid=%r mine=%r type=%s", ev.get("session_id"), self.session_id, etype)
                 if etype in ("message.delta", "message.interim", "message.complete"):
                     payload = ev.get("payload") or {}
                     text = payload.get("text", "") if isinstance(payload, dict) else ""
                     if etype == "message.complete" and not text:
                         # some builds put the full text at top level
                         text = ev.get("text", "") or (payload or {}).get("content", "")
-                    for fut in list(self._turn_futs):
-                        if not fut.done():
-                            fut.set_result({"type": etype, "text": text})
+                    evout = {"type": etype, "text": text}
+                    for q in list(self._turn_queues):
+                        q.put_nowait(evout)
         except websockets.ConnectionClosed:
             log.warning("bridge WS closed; reconnecting")
             await asyncio.sleep(2)
@@ -151,8 +153,8 @@ class LarsBridge:
     async def _send(self, text, on_delta, on_done, on_error):
         if not self.session_id:
             await self._resume_session()
-        turn_fut = self._loop.create_future()
-        self._turn_futs.append(turn_fut)
+        turn_q: asyncio.Queue = asyncio.Queue()
+        self._turn_queues.append(turn_q)
         full = []
         try:
             params = lambda: {
@@ -172,11 +174,8 @@ class LarsBridge:
                 raise RuntimeError(r["error"].get("message", "submit failed"))
             # pump events until turn completes (message.complete with text, or
             # a quiet gap after streaming stopped)
-            last = asyncio.get_event_loop().time()
             while True:
-                done = await asyncio.wait_for(
-                    asyncio.shield(self._drain_turn(turn_fut, full)), timeout=180)
-                if done:
+                if await self._drain_turn(turn_q, full, on_delta):
                     break
         except Exception as exc:
             log.exception("send failed")
@@ -184,20 +183,24 @@ class LarsBridge:
                 on_error(str(exc))
         finally:
             with contextlib.suppress(ValueError):
-                self._turn_futs.remove(turn_fut)
+                self._turn_queues.remove(turn_q)
             if on_done:
                 on_done("".join(full))
 
-    async def _drain_turn(self, turn_fut, full) -> bool:
+    async def _drain_turn(self, turn_q: asyncio.Queue, full: list, on_delta=None) -> bool:
         """Wait for one event; returns True when the turn is complete."""
         try:
-            ev = await asyncio.wait_for(turn_fut, timeout=120)
+            ev = await asyncio.wait_for(turn_q.get(), timeout=120)
         except asyncio.TimeoutError:
             return True  # silence = turn over (no deltas for 2 min)
-        if ev["type"] == "message.delta":
+        if ev["type"] in ("message.delta", "message.interim"):
             full.append(ev["text"])
+            if on_delta:
+                on_delta(ev["text"])
         elif ev["type"] == "message.complete":
-            if ev["text"]:
+            # complete's text is the FULL reply, not incremental — only use it
+            # when no deltas streamed (some models answer in a single chunk)
+            if ev["text"] and not full:
                 full.append(ev["text"])
             return True
         return False
