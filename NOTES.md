@@ -6,7 +6,47 @@ when a decision changes.
 
 ---
 
+## Handoff — 2026-09-28 16:00 (voice module: wired, live-debug phase)
+
+**Where we are (machine-2, commit b8b9b0d+):** voice server + plugin UI are fully wired and
+the whole chain is probe-verified (see Voice-AI-README.md top banner for the machine handoff
+details). :8000 must be RUNNING for the plugin's WS to connect — it dies whenever it was
+started as a background shell of an agent session; start it DETACHED:
+
+```powershell
+# scratch/start_voice.ps1 + start_dash.ps1 (profiles/.../cache/scratch on this machine)
+Start-Process -WindowStyle Hidden -FilePath 'C:\Users\Admin\AppData\Local\hermes\desktop-plugins\lars\voice\.venv\Scripts\python.exe' -ArgumentList '-u','voice_server.py' -WorkingDirectory 'C:\Users\Admin\AppData\Local\hermes\desktop-plugins\lars\voice'
+# dashboard (bridge):
+$env:HERMES_DASHBOARD_SESSION_TOKEN='lars-voice-bridge-2026'; $env:HERMES_PROFILE='hermes-desktop-coder'
+Start-Process -WindowStyle Hidden -FilePath 'hermes.cmd' -ArgumentList 'dashboard','--port','9119','--host','127.0.0.1','--no-open'
+```
+
+**Debug state right now (next session's job):**
+- Live UI showed WS to :8000 failing + "Still in CONNECTING state" — root causes found:
+  (1) server was down (start detached per above), (2) startCapture sent before ws open —
+  FIXED with L.sendJSON queue in plugin.js (`b8b9b0d` + this commit). Needs a live retest
+  after ⌘K reload.
+- 50762/api/ws errors in the console are the DESKTOP APP's own gateway socket — unrelated.
+- Probe harnesses (reuse, don't rewrite): profiles/.../cache/scratch/voice_probe3.py (wav→mic
+  path) and typed_probe.py (typed path), run with voice/.venv python against :8000.
+- Still to do: live-mic test in the app, "Hey Lars" wake accuracy, barge-in live feel,
+  LISTEN_WINDOW_S 10 s → 60 s (config.py LARS_VOICE_TEST=0) when stable, session.interrupt
+  on barge-in is wired but unverified live.
+
+**Verified fixes this session (all committed):** bridge per-turn queue (not one-shot future);
+VadModel.window_size() is a METHOD; `_send` needs a captured loop (Starlette WS has no .loop);
+TTS chunks are torch Tensors (need .detach().cpu().numpy()); STT partials must feed only NEW
+audio; JarvisMic must destructure ALL props (voiceLink, transcriptAtom) or ReferenceError.
+
 ## Voice build state — 2026-09-27 (in progress, handoff note)
+
+**VOICE SERVER BUILT + WIRE-VERIFIED 2026-09-28** (see entry below at "voice_server.py WIRED"):
+- Full audio chain over WS verified twice: mic-format wav → STT partials → 600 ms endpoint →
+  bridge session.turn → streaming deltas → per-sentence pocket-tts → PCM to page (430 KB) →
+  done. Typed path ("typed" event) verified: text → same session → TTS → done.
+- Server runs detached: `voice/.venv/Scripts/python.exe voice_server.py` (:8000, engines up ~6 s).
+- plugin.js: VoiceLink (Blob AudioWorklet Int16 16k capture, manual-buffer 24k playback,
+  barge-in stop-all, transcriptAtom, typed box) wired into JarvisMic; mic button = start/stop.
 
 **Proven & verified (do not re-test):**
 - **pocket-tts 3.3.0 streams natively** — see Voice-AI-README.md §6 (RESOLVED entry).
@@ -27,9 +67,28 @@ when a decision changes.
 - `voice/agent_bridge.py` — LarsBridge wrapper (persistent WS thread, auto resume/create,
   delta/done callbacks, interrupt, resume-retry on aged-out live session).
 
-**STUCK (known bug, next step):** the raw protocol works every time, but the LarsBridge
-wrapper hangs in the turn-drain after `prompt.submit` — deltas never reach the callbacks
-(rpc responses do resolve). Debug `_reader()`/`_turn_futs` plumbing in agent_bridge.py.
+**STT/wake/VAD models INSTALLED + VERIFIED 2026-09-28** (voice/models/, gitignored):
+- STT: streaming-zipformer-en-20M-mobile (int8 enc/joiner) — real inference verified: decoded
+  test wav correctly.
+- KWS: kws-zipformer-gigaspeech-3.3M — loads with custom keyword "hey lars" @0.8. GOTCHA:
+  keywords_file needs BPE token pieces from that model's 500-piece tokens.txt, NOT raw words —
+  "hey lars" = `▁HE Y L A R S @0.8` (voice/hey_lars.txt). No 500-word vocab has LARS/HEY.
+- VAD: silero_vad.onnx — 1.13.8 API: nested `SileroVadModelConfig(model=...)` inside
+  `VadModelConfig(silero_vad=...)`; min_silence 0.6 = the 600 ms rule.
+- Venv `voice/.venv` (3.11.16, isolated): torch 2.14.0+cpu, torchaudio, sherpa-onnx 1.13.8,
+  onnxruntime 1.30.0, fastapi/uvicorn/websockets, numpy, pocket-tts 3.3.0. All imports verified.
+- pocket-tts verified: default English voice = 'alba' (CLI picks voice per language; german
+  default = 'juergen' — English-accent voice, NOT used; app is English-only). Sample WAV
+  generated 24 kHz mono. First-gen slow (model download); warm streaming still to measure.
+- Next: voice_server.py (:8000, state machine per §2), then mic hookup in plugin.js.
+
+**STUCK (resolved 2026-09-28 — see below):** RESOLVED 2026-09-28 — the turn drain hung because each
+turn used a one-shot Future: `set_result` captured only the FIRST delta, and every later
+await on the done future instantly replayed that same event, so `message.complete` never
+surfaced. Fix: per-turn `asyncio.Queue` (`_turn_queues`) in agent_bridge.py; reader pushes
+each delta/complete into every active turn queue, drain pops until complete. Also learned:
+**`message.complete` carries the FULL cumulative reply** (not incremental) — drain only
+uses it if no deltas streamed. on_delta now actually fires. Verified round trip OK.
 Then: voice_server.py (:8000, state machine per Voice-AI-README §2), sherpa models,
 plugin-side mic hookup (TALK button → WS to :8000; stateAtom drives deaf/hot/user/lars).
 
