@@ -235,7 +235,7 @@ function KbdIcon() {
   })
 }
 
-function JarvisMic({ posAtom, panelAtom, stateAtom }) {
+function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom }) {
   const micCSS =
     '@keyframes ljSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}' +
     '@keyframes ljReverse{from{transform:rotate(0)}to{transform:rotate(-360deg)}}' +
