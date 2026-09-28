@@ -6,6 +6,40 @@ when a decision changes.
 
 ---
 
+## Voice module — PARTIAL WORKING BETA 2026-09-28 ~22:00 (machine-1, this repo's main)
+
+**WORKING LIVE (Dave-tested):** mic → local faster-whisper STT (plugin_api `/transcribe`) →
+transcript → `typed` event → :8000 → bridge → REAL lars session → streaming reply text →
+per-sentence Pocket-TTS → PCM back → orb SPEAKS. Typed keyboard entry: same path, works.
+This is the hybrid: STT = local whisper in the app; brain+voice = :8000 service.
+
+**How the pieces start (all now token-safe):**
+- :9119 dashboard — launched at login by Startup VBS AND by the desktop app itself on
+  restart (that was the recurring token-less 403: the APP spawns it, not just the VBS).
+  Fix: `setx HERMES_DASHBOARD_SESSION_TOKEN lars-voice-bridge-2026` (user env var) — every
+  launcher inherits it. VBS also sets it explicitly. Repo VBS copy:
+  dashboard-service/Hermes_Dashboard.vbs (outside this repo, on disk).
+- :8000 voice server — run DETACHED: `voice\.venv\Scripts\python.exe -u voice_server.py`
+  (worked dir voice/). Dies if started as an agent-session background shell.
+- Bridge reconnects forever w/ backoff now (single-shot reconnect caused "Lars silent").
+
+**Key gotchas found this session (all fixed):**
+- torch 2.14+cpu needs VC++ redist ≥14.4x (WinError 1114 c10.dll) — updated via winget.
+- Desktop AudioContext ignores the 16k getUserMedia constraint → server now honors the
+  page-declared `audio_format.rate` and resamples (48k→16k) before VAD/STT.
+- Electron plugin-page origin is file:// — server origin check widened (token still gates).
+- LarsBridge one-shot future bug → per-turn asyncio.Queue (machine-2 fix, now on main).
+
+**KNOWN LIMITATION (next iteration):** opening the same session in core Sessions chat and
+typing there errors "This chat is open somewhere else" — the bridge holds the persistent
+session open. Handover design needed (release/re-attach on Expand, or session.interrupt).
+
+**Debt to burn before production:** debug logging + debug_last.wav dump in voice_server.py;
+LARS_VOICE_TEST=1 (10 s window) → flip to 0 (60 s); wake-word "Hey Lars" untested live;
+barge-in untested live; parallel-editor collisions on plugin.js (two agents, one file).
+
+---
+
 ## Handoff — 2026-09-28 16:00 (voice module: wired, live-debug phase)
 
 **Where we are (machine-2, commit b8b9b0d+):** voice server + plugin UI are fully wired and

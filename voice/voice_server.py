@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import threading
 import time
 
@@ -25,7 +26,9 @@ from vad import VAD
 from wake_engine import Wake
 
 log = logging.getLogger("lars.voice")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s",
+                    handlers=[logging.StreamHandler(),
+                              logging.FileHandler(os.path.join(os.path.dirname(__file__), "voice_server.log"), encoding="utf-8")])
 
 app = FastAPI(title="Lars Voice Local Core")
 
@@ -48,7 +51,14 @@ async def _startup():
 
 def _origin_ok(ws: WebSocket) -> bool:
     o = ws.headers.get("origin", "")
-    return o.startswith(("http://127.0.0.1", "http://localhost"))
+    # Loopback http(s) + the desktop app's plugin-page origins (file://, app://,
+    # or no Origin at all). Token check still guards every connection.
+    ok = (o == "" or o.startswith(("http://127.0.0.1", "http://localhost",
+                                   "https://127.0.0.1", "https://localhost",
+                                   "file://", "app://", "null")))
+    if not ok:
+        log.warning("rejected origin: %r", o)
+    return ok
 
 
 def _token_ok(ws: WebSocket, token: str) -> bool:
@@ -64,20 +74,50 @@ def _send(ws, obj: dict):
 class Turn:
     """One LISTEN→SPEAK turn; owns capture buffers + VAD + STT + barge-in."""
 
-    def __init__(self, ws, session):
+    def __init__(self, ws, session, rate=16000):
         self.ws = ws
         self.session = session
+        self.rate = rate            # capture rate as declared by the page
         self.vad = VAD()
         self.stt_stream = _stt.new_stream()
-        self.buf = []            # float32 PCM chunks captured
+        self.buf = []            # float32 PCM chunks captured (16k)
         self.fed = 0             # samples already fed to STT (feed only NEW audio)
         self.speaking = False
         self.tts_stop = threading.Event()
         self.finishing = False
 
-    async def feed(self, pcm_i16):
-        """Audio chunk from the page (int16 16k mono)."""
+    def _resample(self, pcm_i16: np.ndarray) -> np.ndarray:
         pcm = pcm_i16.astype(np.float32) / 32768.0
+        if self.rate == 16000 or len(pcm) == 0:
+            return pcm
+        # linear resample capture rate → 16 kHz (desktop AudioContexts ignore
+        # the 16k getUserMedia constraint and hand us 44.1/48 kHz)
+        n_out = int(round(len(pcm) * 16000 / self.rate))
+        if n_out < 1:
+            return np.zeros(0, np.float32)
+        return np.interp(
+            np.linspace(0.0, len(pcm) - 1, n_out),
+            np.arange(len(pcm)), pcm).astype(np.float32)
+
+    async def feed(self, pcm_i16):
+        """Audio chunk from the page (int16, capture rate mono)."""
+        pcm = self._resample(pcm_i16)
+        if len(pcm) == 0:
+            return
+        # DEBUG: peak/RMS of every ~1s of incoming audio
+        rms = float(np.sqrt(np.mean(pcm ** 2)) + 1e-12)
+        self.dbg_peak = max(getattr(self, "dbg_peak", 0.0), float(np.max(np.abs(pcm))))
+        self.dbg_n = getattr(self.dbg_n, "real", 0) if hasattr(self.dbg_n, "real") else 0
+        self.dbg_n += len(pcm)
+        self.dbg_raw = getattr(self, "dbg_raw", None)
+        if self.dbg_raw is None:
+            self.dbg_raw = pcm_i16
+        elif len(self.dbg_raw) < 16000 * 20:
+            self.dbg_raw = np.concatenate([self.dbg_raw, pcm_i16])
+        if self.dbg_n >= 16000:
+            log.info("mic: rms=%.4f peak=%.4f rate=%s", rms, self.dbg_peak, self.rate)
+            self.dbg_n = 0
+            self.dbg_peak = 0.0
         speech = self.vad.is_speech(pcm)
 
         if self.speaking:
@@ -111,6 +151,18 @@ class Turn:
             text = _stt.finalize(self.stt_stream)
             log.info("user said: %r", text)
             if not text.strip():
+                # DEBUG: dump what we heard so it can be analyzed offline
+                raw = getattr(self, "dbg_raw", None)
+                if raw is not None and len(raw) > 1600:
+                    try:
+                        import wave as _w
+                        with _w.open(os.path.join(os.path.dirname(__file__), "debug_last.wav"), "wb") as f:
+                            f.setnchannels(1); f.setsampwidth(2); f.setframerate(self.rate)
+                            f.writeframes(raw[:16000 * 20].astype(np.int16).tobytes())
+                        log.info("dumped debug_last.wav (%s samples @ %s Hz, peak %.4f)",
+                                 len(raw), self.rate, getattr(self, "dbg_peak_all", 0) or 0)
+                    except Exception:
+                        log.exception("debug dump failed")
                 _send(self.ws, {"event": "state", "state": "listening"})
                 return
             _send(self.ws, {"event": "state", "state": "processing"})
@@ -131,10 +183,12 @@ class Turn:
         def pump():
             def on_delta(d):
                 loop.call_soon_threadsafe(q.put_nowait, d)
-            self.session.send(text, on_delta=on_delta,
-                              on_done=lambda full: loop.call_soon_threadsafe(q.put_nowait, None),
-                              on_error=lambda e: (log.error("bridge: %s", e),
-                                                  loop.call_soon_threadsafe(q.put_nowait, None)))
+            def on_error(e):
+                log.error("bridge: %s", e)
+                loop.call_soon_threadsafe(q.put_nowait, ("__error__", e))
+                loop.call_soon_threadsafe(q.put_nowait, None)
+            self.session.send(text, on_delta=on_delta, on_done=lambda full: loop.call_soon_threadsafe(q.put_nowait, None),
+                              on_error=on_error)
         threading.Thread(target=pump, daemon=True).start()
 
         _send(self.ws, {"event": "state", "state": "lars"})
@@ -145,6 +199,9 @@ class Turn:
             while True:
                 item = await q.get()
                 if item is None:
+                    break
+                if isinstance(item, tuple) and item[0] == "__error__":
+                    _send(self.ws, {"event": "error", "msg": "bridge: " + item[1]})
                     break
                 full_reply.append(item)
                 _send(self.ws, {"event": "text", "role": "lars", "text": item})
@@ -211,6 +268,7 @@ def _pop_sentence(s: str):
 async def voice_endpoint(ws: WebSocket, token: str = ""):
     ws._lars_loop = asyncio.get_running_loop()
     await ws.accept()
+    log.info("client connected (origin=%r)", ws.headers.get("origin", ""))
     if not _origin_ok(ws):
         await ws.close(code=4403)
         return
@@ -227,6 +285,7 @@ async def voice_endpoint(ws: WebSocket, token: str = ""):
         return
 
     state = "hot"          # HOT_MIC default: page streams, KWS armed
+    cap_rate = 16000       # capture sample rate as declared by the page
     wake_stream = _wake.new_stream()
     turn: Turn | None = None
 
@@ -243,7 +302,7 @@ async def voice_endpoint(ws: WebSocket, token: str = ""):
                     if hit.strip():
                         log.info("WAKE: %r", hit)
                         state = "listening"
-                        turn = Turn(ws, session)
+                        turn = Turn(ws, session, cap_rate)
                         _send(ws, {"event": "state", "state": "listening"})
                         wake_stream = _wake.new_stream()
                 elif state == "listening" and turn is not None:
@@ -251,9 +310,14 @@ async def voice_endpoint(ws: WebSocket, token: str = ""):
             elif "text" in msg:
                 ev = json.loads(msg["text"])
                 kind = ev.get("event")
-                if kind in ("listen", "wake"):
+                if kind == "audio_format":
+                    r = ev.get("rate") or 16000
+                    if r != cap_rate:
+                        log.info("capture rate: %s Hz", r)
+                    cap_rate = int(r)
+                elif kind in ("listen", "wake"):
                     state = "listening"
-                    turn = Turn(ws, session)
+                    turn = Turn(ws, session, cap_rate)
                     _send(ws, {"event": "state", "state": "listening"})
                 elif kind == "eos":
                     if turn:
@@ -263,7 +327,7 @@ async def voice_endpoint(ws: WebSocket, token: str = ""):
                     text = (ev.get("text") or "").strip()
                     if text:
                         if turn is None:
-                            turn = Turn(ws, session)
+                            turn = Turn(ws, session, cap_rate)
                         _send(ws, {"event": "state", "state": "processing"})
                         _send(ws, {"event": "text", "role": "user", "text": text})
                         await turn.run_agent(text)

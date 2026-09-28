@@ -115,9 +115,19 @@ class LarsBridge:
                         q.put_nowait(evout)
         except websockets.ConnectionClosed:
             log.warning("bridge WS closed; reconnecting")
-            await asyncio.sleep(2)
-            with contextlib.suppress(Exception):
-                await self._attach()
+            # Reconnect with backoff FOREVER — the gateway restarts (app restarts,
+            # crashes); a single-shot reconnect killed the bridge for the rest of
+            # the server's life (2026-09-28 live failure: STT fine, Lars silent).
+            delay = 1.0
+            while True:
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30)
+                try:
+                    await self._attach()
+                    log.info("bridge re-attached, session %s", self.session_id)
+                    return
+                except Exception as e:
+                    log.warning("re-attach failed: %s", e)
         except Exception:
             log.exception("bridge reader died")
 

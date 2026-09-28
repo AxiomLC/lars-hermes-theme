@@ -2,3 +2,5 @@ __pycache__/
 
 voice/.venv/
 voice/models/
+voice/voice_server.log
+voice/debug_last.wav
