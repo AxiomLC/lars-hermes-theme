@@ -211,7 +211,9 @@ class LarsBridge:
                 await self._rpc("session.interrupt", {"session_id": self.session_id, "profile": self.profile})
 
     def close(self):
-        self._coro(self._ws.close(), timeout=5)
+        with contextlib.suppress(Exception):
+            if self._ws is not None:
+                self._coro(self._ws.close(), timeout=5)
         self._loop.call_soon_threadsafe(self._loop.stop)
 
 

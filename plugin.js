@@ -86,6 +86,119 @@ const JV = {
   mono: '"JetBrains Mono",ui-monospace,Menlo,monospace'
 }
 
+// ── VoiceLink — WS to local voice service :8000 (Voice-AI-README §4) ─────────
+// State map (service → stateAtom): 'listening'→'hot', partial user text→'user',
+// 'lars'→'lars', done→'hot'. Capture: AudioWorklet Int16 16k via Blob URL.
+// Playback: manual AudioBuffers chained back-to-back, refs kept for barge-in.
+const VOICE_WS = 'ws://127.0.0.1:8000/ws/voice?token=lars-voice-dev-token'
+
+function createVoiceLink(stateAtom, onText) {
+  const L = { ws: null, ctx: null, node: null, stream: null, open: false,
+              playing: false, srcs: [], nextAt: 0, rate: 24000 }
+  const workletCode =
+    'class PCMCap extends AudioWorkletProcessor {' +
+    '  process(inputs){' +
+    '    const ch = inputs[0][0]; if(!ch) return true;' +
+    '    const i16 = new Int16Array(ch.length);' +
+    '    for(let i=0;i<ch.length;i++) i16[i] = Math.max(-32768, Math.min(32767, ch[i]*32767));' +
+    '    this.port.postMessage(i16.buffer, [i16.buffer]);' +
+    '    return true } }' +
+    'registerProcessor("lars-pcm", PCMCap)'
+  L.workletURL = URL.createObjectURL(new Blob([workletCode], { type: 'application/javascript' }))
+
+  L.setState = s => stateAtom.set(s)
+
+  L.onFrame = ev => {
+    const d = JSON.parse(ev.data)
+    if (d.event === 'audio_format') L.rate = d.rate
+    else if (d.event === 'state') L.setState(d.state === 'listening' ? 'hot' : d.state)
+    else if (d.event === 'text') {
+      if (d.role === 'user' && d.text) L.setState('user')
+      if (d.role === 'lars') L.setState('lars')
+      if (onText) onText(d.role, d.text || '')
+    } else if (d.event === 'done') L.setState('hot')
+    else if (d.event === 'interrupted' || d.event === 'timeout') L.setState('hot')
+    else if (d.event === 'error') { L.setState('deaf'); if (onText) onText('err', d.msg) }
+  }
+
+  L.start = () => {
+    if (L.open) return
+    L.open = true
+    L.ws = new WebSocket(VOICE_WS)
+    L.ws.binaryType = 'arraybuffer'
+    L.ws.onopen = () => { /* hello via token query param; audio_format next */ }
+    L.ws.onmessage = ev => {
+      if (ev.data instanceof ArrayBuffer) L.playChunk(ev.data)
+      else L.onFrame(ev)
+    }
+    L.ws.onclose = () => { L.open = false; L.setState('deaf'); L.stopCapture() }
+  }
+
+  L.stop = () => {
+    L.stopCapture()
+    if (L.ws) { try { L.ws.close() } catch (e) {} L.ws = null }
+    L.open = false
+    L.setState('deaf')
+  }
+
+  L.startCapture = async () => {
+    if (L.stream) return
+    try {
+      L.stream = await navigator.mediaDevices.getUserMedia({ audio: {
+        channelCount: 1, sampleRate: 16000, echoCancellation: true,
+        noiseSuppression: true, autoGainControl: true } })
+      L.ctx = new AudioContext({ sampleRate: 16000 })
+      await L.ctx.audioWorklet.addModule(L.workletURL)
+      L.node = new AudioWorkletNode(L.ctx, 'lars-pcm')
+      L.node.port.onmessage = e => {
+        if (L.ws && L.ws.readyState === 1) L.ws.send(e.data)
+      }
+      const src = L.ctx.createMediaStreamSource(L.stream)
+      src.connect(L.node)  // node is a sink — do NOT connect to destination
+      if (L.ws && L.ws.readyState === 1) L.ws.send(JSON.stringify({
+        event: 'audio_format', rate: L.ctx.sampleRate }))
+      L.ws.send(JSON.stringify({ event: 'listen' }))
+    } catch (e) { if (onText) onText('err', 'mic: ' + e.message); L.setState('deaf') }
+  }
+
+  L.stopCapture = () => {
+    if (L.stream) { L.stream.getTracks().forEach(t => t.stop()); L.stream = null }
+    if (L.node) { try { L.node.disconnect() } catch (e) {} L.node = null }
+    if (L.ctx) { try { L.ctx.close() } catch (e) {} L.ctx = null }
+  }
+
+  L.playChunk = ab => {
+    if (!L.ctxP) L.ctxP = new AudioContext({ sampleRate: 24000 })
+    const n = new Int16Array(ab).length
+    const buf = L.ctxP.createBuffer(1, n, L.rate)
+    const ch = buf.getChannelData(0)
+    const i16 = new Int16Array(ab)
+    for (let i = 0; i < n; i++) ch[i] = i16[i] / 32768
+    const src = L.ctxP.createBufferSource()
+    src.buffer = buf
+    src.connect(L.ctxP.destination)
+    const at = Math.max(L.ctxP.currentTime, L.nextAt)
+    src.start(at)
+    L.nextAt = at + buf.duration
+    L.srcs.push(src)
+    src.onended = () => { L.srcs = L.srcs.filter(s => s !== src) }
+  }
+
+  L.bargeIn = () => {
+    // stop all scheduled sources + flush the chain
+    L.srcs.forEach(s => { try { s.stop() } catch (e) {} })
+    L.srcs = []
+    L.nextAt = 0
+    if (L.ws && L.ws.readyState === 1) L.ws.send(JSON.stringify({ event: 'interrupt' }))
+  }
+
+  L.typed = text => {
+    if (L.ws && L.ws.readyState === 1) L.ws.send(JSON.stringify({ event: 'typed', text }))
+  }
+
+  return L
+}
+
 // ── JarvisMic — dynamic voice module (lower-right of Div 7) ──────────────────
 // Dark-glass reactor: two counter-rotating dashed rings, three colored arcs
 // lunging over a pulsing glowing orb, plus live waveform bars (CSS-animated).
@@ -183,8 +296,8 @@ function JarvisMic({ posAtom, panelAtom, stateAtom }) {
     alignItems: 'center'
   }
 
-  // Panel mode: 25% of the custom-page width (viewport-based — the page content
-  // area is flex, so 25vw tracks it without touching layout of other items).
+  // Panel mode: transcript (live) + type box → same session as voice.
+  const entries = useValue(transcriptAtom)
   const transcript = jsxs('div', {
     style: {
       flex: 1,
@@ -197,12 +310,28 @@ function JarvisMic({ posAtom, panelAtom, stateAtom }) {
       fontSize: '11px',
       color: JV.mut
     },
-    children: 'Voice core not wired yet — transcript will show here.'
+    children: (entries || []).length
+      ? entries.map((e, i) => jsxs('div', {
+          key: i,
+          style: { marginBottom: '4px', color: e.role === 'user' ? JV.green : e.role === 'err' ? JV.amber : JV.ink },
+          children: [
+            jsx('span', { style: { color: JV.dim, marginRight: '4px' },
+              children: e.role === 'user' ? 'you:' : e.role === 'err' ? 'err:' : 'lars:' }),
+            e.text
+          ]
+        }))
+      : 'Voice core wired — talk or type. Transcript shows here.'
   })
 
   const typeBox = jsx('input', {
     type: 'text',
-    placeholder: 'Type to Lars…',
+    placeholder: 'Type to Lars… (Enter sends)',
+    onKeyDown: e => {
+      if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+        voiceLink.typed(e.currentTarget.value.trim())
+        e.currentTarget.value = ''
+      }
+    },
     style: {
       width: '100%',
       background: 'rgba(2,7,12,0.55)',
@@ -273,7 +402,14 @@ function JarvisMic({ posAtom, panelAtom, stateAtom }) {
           jsx('button', {
                       type: 'button',
                       title: 'Talk — toggle hot mic (60 s listening window; off = deaf until "Hey Lars")',
-                      onClick: () => stateAtom.set(vstate === 'deaf' ? 'hot' : 'deaf'),
+                      onClick: () => {
+                        if (vstate === 'deaf') {
+                          voiceLink.start()
+                          voiceLink.startCapture()   // async; listen sent on stream ready
+                        } else {
+                          voiceLink.stop()
+                        }
+                      },
                       style: iconBtn,
                       children: jsx(MicIcon, { on: hot })
                     }),
@@ -407,7 +543,7 @@ function TitlebarUtils() {
 // ── Shared page chrome ───────────────────────────────────────────────────────
 // Atoms are created ONCE in register() and passed in — never inside the
 // component (a fresh atom per render would reset state on every keystroke).
-function LarsPage({ collapsedAtom, expandedAtom, posAtom, panelAtom, stateAtom, activePath, div, store }) {
+function LarsPage({ collapsedAtom, expandedAtom, posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom, activePath, div, store }) {
   const collapsed = useValue(collapsedAtom)
   const expanded = useValue(expandedAtom)
   let scrollEl = null
@@ -500,7 +636,7 @@ function LarsPage({ collapsedAtom, expandedAtom, posAtom, panelAtom, stateAtom, 
 
   // Voice/mic module: floats on EVERY custom page (fixed overlay, persists
       // across Div nav). Lars shell level.
-      const micModule = jsx(JarvisMic, { posAtom, panelAtom, stateAtom })
+      const micModule = jsx(JarvisMic, { posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
 
   // Own the app titlebar while Div 7 is up: contribution into titleBar slots
     // makes pageOwnsTitlebar true → the app's fixed clusters hide, ours render.
@@ -622,6 +758,13 @@ export default {
               panelAtom.listen(v => ctx.storage.set('micPanel', v))
               // Voice state — NOT persisted (a reload = deaf, wake re-arms via "Hey Lars").
               const stateAtom = atom('deaf')
+              // Transcript + voice link (created ONCE here — survives page nav).
+              const transcriptAtom = atom([])
+              const voiceLink = createVoiceLink(stateAtom, (role, text) => {
+                if (!text) return
+                transcriptAtom.set([...(transcriptAtom.get() || []),
+                  { role, text, t: Date.now() }].slice(-50))
+              })
 
     // Sidebar nav row "next to Kanban" (order 50). /lars is a RESOLVER: it
     // renders the last-visited page instead of a fixed home.
@@ -661,6 +804,8 @@ export default {
                       posAtom,
                                   panelAtom,
                                   stateAtom,
+                                  voiceLink,
+                                  transcriptAtom,
                       activePath: resolved.path,
             div: resolved,
             store: ctx.storage

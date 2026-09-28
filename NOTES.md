@@ -8,6 +8,14 @@ when a decision changes.
 
 ## Voice build state — 2026-09-27 (in progress, handoff note)
 
+**VOICE SERVER BUILT + WIRE-VERIFIED 2026-09-28** (see entry below at "voice_server.py WIRED"):
+- Full audio chain over WS verified twice: mic-format wav → STT partials → 600 ms endpoint →
+  bridge session.turn → streaming deltas → per-sentence pocket-tts → PCM to page (430 KB) →
+  done. Typed path ("typed" event) verified: text → same session → TTS → done.
+- Server runs detached: `voice/.venv/Scripts/python.exe voice_server.py` (:8000, engines up ~6 s).
+- plugin.js: VoiceLink (Blob AudioWorklet Int16 16k capture, manual-buffer 24k playback,
+  barge-in stop-all, transcriptAtom, typed box) wired into JarvisMic; mic button = start/stop.
+
 **Proven & verified (do not re-test):**
 - **pocket-tts 3.3.0 streams natively** — see Voice-AI-README.md §6 (RESOLVED entry).
 - **Bridge transport VERIFIED END-TO-END, raw protocol:** dashboard on :9119 must be launched
