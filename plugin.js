@@ -126,12 +126,23 @@ function createVoiceLink(stateAtom, onText) {
     L.open = true
     L.ws = new WebSocket(VOICE_WS)
     L.ws.binaryType = 'arraybuffer'
-    L.ws.onopen = () => { /* hello via token query param; audio_format next */ }
+    // queue anything sent before the socket opens (CONNECTING-state guard)
+    L.q = []
+    L.ws.onopen = () => {
+      L.q.forEach(m => L.ws.send(m))
+      L.q = []
+    }
     L.ws.onmessage = ev => {
       if (ev.data instanceof ArrayBuffer) L.playChunk(ev.data)
       else L.onFrame(ev)
     }
     L.ws.onclose = () => { L.open = false; L.setState('deaf'); L.stopCapture() }
+  }
+
+  L.sendJSON = obj => {
+    const s = JSON.stringify(obj)
+    if (L.ws && L.ws.readyState === 1) L.ws.send(s)
+    else if (L.ws && L.ws.readyState === 0) L.q.push(s)   // still CONNECTING
   }
 
   L.stop = () => {
@@ -151,13 +162,12 @@ function createVoiceLink(stateAtom, onText) {
       await L.ctx.audioWorklet.addModule(L.workletURL)
       L.node = new AudioWorkletNode(L.ctx, 'lars-pcm')
       L.node.port.onmessage = e => {
-        if (L.ws && L.ws.readyState === 1) L.ws.send(e.data)
+        if (L.ws && L.ws.readyState === 1) { try { L.ws.send(e.data) } catch (err) {} }
       }
       const src = L.ctx.createMediaStreamSource(L.stream)
       src.connect(L.node)  // node is a sink — do NOT connect to destination
-      if (L.ws && L.ws.readyState === 1) L.ws.send(JSON.stringify({
-        event: 'audio_format', rate: L.ctx.sampleRate }))
-      L.ws.send(JSON.stringify({ event: 'listen' }))
+      L.sendJSON({ event: 'audio_format', rate: L.ctx.sampleRate })
+      L.sendJSON({ event: 'listen' })
     } catch (e) { if (onText) onText('err', 'mic: ' + e.message); L.setState('deaf') }
   }
 

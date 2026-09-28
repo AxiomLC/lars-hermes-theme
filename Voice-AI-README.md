@@ -3,6 +3,33 @@
 **Branch:** machine-2 · **Status:** agreed design, supersedes rev. 1
 **Build doc:** Hermes Local Voice Core — Windows 11, CPU-only, plugin-page voice for the Div 7 orb.
 
+> **BUILD STATE 2026-09-28 (machine-2, `voice/` + plugin.js) — WIRED & WIRE-VERIFIED, live testing.**
+> Read this first if you're picking up the build on the other machine:
+>
+> **Installed & working (machine-2, all verified with real runs — do not re-verify):**
+> - Venv `voice/.venv` (3.11.16, isolated): torch 2.14.0+cpu, torchaudio 2.11.0+cpu,
+>   sherpa-onnx 1.13.8, onnxruntime 1.30.0, numpy 2.4.6, fastapi/uvicorn/websockets, pocket-tts 3.3.0.
+> - Models in `voice/models/` (gitignored): streaming-zipformer-en-20M-mobile (STT, inference
+>   verified), kws-zipformer-gigaspeech-3.3M (wake — **keywords file must be BPE pieces**,
+>   `hey lars` = `▁HE Y L A R S @0.8` in voice/hey_lars.txt), silero_vad.onnx.
+> - `voice/voice_server.py` (:8000) + config/stt/tts/vad/wake modules — full chain VERIFIED
+>   end-to-end twice with scripted WS probes: wav audio in → STT partials → 600 ms endpoint →
+>   bridge → streaming deltas → per-sentence pocket-tts ('alba', 24 kHz) → PCM frames to page
+>   (422 KB) → done. Typed-text path (`{"event":"typed"}`) verified too.
+> - plugin.js `VoiceLink` wired into JarvisMic: Blob-URL AudioWorklet Int16 16k capture,
+>   manual-buffer 24 kHz playback, barge-in stop-all, transcript panel, typed box.
+> - Bridge: dashboard :9119 must run with `HERMES_DASHBOARD_SESSION_TOKEN=lars-voice-bridge-2026`
+>   (detached relaunch script pattern in NOTES.md). Token for :8000 = `lars-voice-dev-token` (config.py).
+>
+> **Current known issue (debugging when this note was written):** from the live desktop UI the
+> page's WS to :8000 dropped / capture could send in CONNECTING state (fixed: sendJSON queue).
+> The audio chain itself is proven via probes — the remaining work is live-mic debugging in the
+> desktop app and wake-word ("Hey Lars") live accuracy.
+>
+> **To start the stack on this machine:** run detached PowerShell:
+> `Start-Process -WindowStyle Hidden <voice>/.venv/Scripts/python.exe -ArgumentList '-u','voice_server.py'
+> -WorkingDirectory <repo>/voice` (engines load ~6–9 s), plus the dashboard relaunch with the token env.
+
 ---
 
 ## 1. Constraint (why this stack exists)

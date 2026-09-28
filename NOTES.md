@@ -6,6 +6,38 @@ when a decision changes.
 
 ---
 
+## Handoff — 2026-09-28 16:00 (voice module: wired, live-debug phase)
+
+**Where we are (machine-2, commit b8b9b0d+):** voice server + plugin UI are fully wired and
+the whole chain is probe-verified (see Voice-AI-README.md top banner for the machine handoff
+details). :8000 must be RUNNING for the plugin's WS to connect — it dies whenever it was
+started as a background shell of an agent session; start it DETACHED:
+
+```powershell
+# scratch/start_voice.ps1 + start_dash.ps1 (profiles/.../cache/scratch on this machine)
+Start-Process -WindowStyle Hidden -FilePath 'C:\Users\Admin\AppData\Local\hermes\desktop-plugins\lars\voice\.venv\Scripts\python.exe' -ArgumentList '-u','voice_server.py' -WorkingDirectory 'C:\Users\Admin\AppData\Local\hermes\desktop-plugins\lars\voice'
+# dashboard (bridge):
+$env:HERMES_DASHBOARD_SESSION_TOKEN='lars-voice-bridge-2026'; $env:HERMES_PROFILE='hermes-desktop-coder'
+Start-Process -WindowStyle Hidden -FilePath 'hermes.cmd' -ArgumentList 'dashboard','--port','9119','--host','127.0.0.1','--no-open'
+```
+
+**Debug state right now (next session's job):**
+- Live UI showed WS to :8000 failing + "Still in CONNECTING state" — root causes found:
+  (1) server was down (start detached per above), (2) startCapture sent before ws open —
+  FIXED with L.sendJSON queue in plugin.js (`b8b9b0d` + this commit). Needs a live retest
+  after ⌘K reload.
+- 50762/api/ws errors in the console are the DESKTOP APP's own gateway socket — unrelated.
+- Probe harnesses (reuse, don't rewrite): profiles/.../cache/scratch/voice_probe3.py (wav→mic
+  path) and typed_probe.py (typed path), run with voice/.venv python against :8000.
+- Still to do: live-mic test in the app, "Hey Lars" wake accuracy, barge-in live feel,
+  LISTEN_WINDOW_S 10 s → 60 s (config.py LARS_VOICE_TEST=0) when stable, session.interrupt
+  on barge-in is wired but unverified live.
+
+**Verified fixes this session (all committed):** bridge per-turn queue (not one-shot future);
+VadModel.window_size() is a METHOD; `_send` needs a captured loop (Starlette WS has no .loop);
+TTS chunks are torch Tensors (need .detach().cpu().numpy()); STT partials must feed only NEW
+audio; JarvisMic must destructure ALL props (voiceLink, transcriptAtom) or ReferenceError.
+
 ## Voice build state — 2026-09-27 (in progress, handoff note)
 
 **VOICE SERVER BUILT + WIRE-VERIFIED 2026-09-28** (see entry below at "voice_server.py WIRED"):
