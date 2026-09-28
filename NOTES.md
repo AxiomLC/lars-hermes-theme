@@ -6,6 +6,33 @@ when a decision changes.
 
 ---
 
+## NEXT BIG FIX — FULL STREAMING VOICE (designed, not yet built) — 2026-09-28 ~22:30
+
+**Design is DONE and committed: `specs/voice-streaming-design.md`. Pick it up in a fresh
+session.** Summary of what it delivers and how:
+
+1. **Mic ON = true streaming.** The page becomes a dumb mic: every AudioWorklet Int16
+   frame goes straight to :8000 over WS (no local buffering, no batch whisper in the
+   page). The :8000 server ALREADY implements the whole continuous pipeline (VAD, state
+   machine, streaming zipformer, per-sentence TTS, barge-in mechanics) — that's why this
+   is mostly page-side deletion + server-side small changes.
+2. **Fred-AI turn-taking:** server VAD + **2.0 s silence** ends the user's turn
+   automatically → Lars responds with no button press. Continuous loop
+   LISTENING→PROCESSING→SPEAKING→LISTENING until mic OFF.
+3. **STT = hybrid:** streaming zipformer runs the loop/live captions; after the 2 s
+   silence the server re-transcribes the full turn buffer with faster-whisper (accuracy
+   parity with today) and prefers its text. ~3–5 s to first spoken audio.
+4. **Barge-in:** mic keeps streaming during SPEAKING; sustained user speech (≥200 ms,
+   echo guard vs Lars hearing himself) → tts_stop cancels Pocket-TTS + gateway
+   `session.interrupt` → page flushes scheduled audio buffers → user's words are already
+   in the new turn. Full step-by-step in the spec.
+5. **Attach-per-turn (SHIPPED TODAY, below):** the same research found the session-lease
+   mechanism behind "This chat is open somewhere else" — fixed the same day (see next
+   entry); voice now releases the session lease between turns, so core Sessions chat and
+   the voice module co-exist on one Lars session.
+
+---
+
 ## Voice module — PARTIAL WORKING BETA 2026-09-28 ~22:00 (machine-1, this repo's main)
 
 **WORKING LIVE (Dave-tested):** mic → local faster-whisper STT (plugin_api `/transcribe`) →
@@ -30,9 +57,12 @@ This is the hybrid: STT = local whisper in the app; brain+voice = :8000 service.
 - Electron plugin-page origin is file:// — server origin check widened (token still gates).
 - LarsBridge one-shot future bug → per-turn asyncio.Queue (machine-2 fix, now on main).
 
-**KNOWN LIMITATION (next iteration):** opening the same session in core Sessions chat and
-typing there errors "This chat is open somewhere else" — the bridge holds the persistent
-session open. Handover design needed (release/re-attach on Expand, or session.interrupt).
+**KNOWN LIMITATION — FIXED 2026-09-28 ~22:30 (ATTACH-PER-TURN):** the "open somewhere
+else" error is a gateway session LEASE claimed on first prompt turn and held until
+session.close. agent_bridge now closes the session after every voice turn and resumes
+(lazy, close_on_disconnect) at the start of the next one — lease free between turns, so
+core Sessions chat and voice co-exist. Verified: resume→close→resume cycle, fresh live id
+each turn. Fresh chat should still live-test UI co-existence.
 
 **Debt to burn before production:** debug logging + debug_last.wav dump in voice_server.py;
 LARS_VOICE_TEST=1 (10 s window) → flip to 0 (60 s); wake-word "Hey Lars" untested live;
