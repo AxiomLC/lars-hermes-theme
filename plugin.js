@@ -297,7 +297,9 @@ function JarvisMic({ posAtom, panelAtom, stateAtom }) {
   }
 
   // Panel mode: transcript (live) + type box → same session as voice.
-  const entries = useValue(transcriptAtom)
+  // transcriptAtom is a version counter; entries live on voiceLink.log.
+  useValue(transcriptAtom)
+  const entries = (voiceLink && voiceLink.log) || []
   const transcript = jsxs('div', {
     style: {
       flex: 1,
@@ -759,12 +761,18 @@ export default {
               // Voice state — NOT persisted (a reload = deaf, wake re-arms via "Hey Lars").
               const stateAtom = atom('deaf')
               // Transcript + voice link (created ONCE here — survives page nav).
-              const transcriptAtom = atom([])
+              // Plain closure array (no atom .get dependency); transcriptAtom
+              // holds a version counter just to trigger re-render.
+              const transcriptAtom = atom(0)
+              const transcriptLog = []
               const voiceLink = createVoiceLink(stateAtom, (role, text) => {
                 if (!text) return
-                transcriptAtom.set([...(transcriptAtom.get() || []),
-                  { role, text, t: Date.now() }].slice(-50))
+                transcriptLog.push({ role, text, t: Date.now() })
+                if (transcriptLog.length > 50) transcriptLog.shift()
+                const cur = typeof transcriptAtom.get === 'function' ? transcriptAtom.get() : 0
+                transcriptAtom.set(cur + 1)
               })
+              voiceLink.log = transcriptLog
 
     // Sidebar nav row "next to Kanban" (order 50). /lars is a RESOLVER: it
     // renders the last-visited page instead of a fixed home.
