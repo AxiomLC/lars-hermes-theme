@@ -27,7 +27,22 @@ when a decision changes.
 - `voice/agent_bridge.py` — LarsBridge wrapper (persistent WS thread, auto resume/create,
   delta/done callbacks, interrupt, resume-retry on aged-out live session).
 
-**STUCK (known bug, next step):** RESOLVED 2026-09-28 — the turn drain hung because each
+**STT/wake/VAD models INSTALLED + VERIFIED 2026-09-28** (voice/models/, gitignored):
+- STT: streaming-zipformer-en-20M-mobile (int8 enc/joiner) — real inference verified: decoded
+  test wav correctly.
+- KWS: kws-zipformer-gigaspeech-3.3M — loads with custom keyword "hey lars" @0.8. GOTCHA:
+  keywords_file needs BPE token pieces from that model's 500-piece tokens.txt, NOT raw words —
+  "hey lars" = `▁HE Y L A R S @0.8` (voice/hey_lars.txt). No 500-word vocab has LARS/HEY.
+- VAD: silero_vad.onnx — 1.13.8 API: nested `SileroVadModelConfig(model=...)` inside
+  `VadModelConfig(silero_vad=...)`; min_silence 0.6 = the 600 ms rule.
+- Venv `voice/.venv` (3.11.16, isolated): torch 2.14.0+cpu, torchaudio, sherpa-onnx 1.13.8,
+  onnxruntime 1.30.0, fastapi/uvicorn/websockets, numpy, pocket-tts 3.3.0. All imports verified.
+- pocket-tts verified: default English voice = 'alba' (CLI picks voice per language; german
+  default = 'juergen' — English-accent voice, NOT used; app is English-only). Sample WAV
+  generated 24 kHz mono. First-gen slow (model download); warm streaming still to measure.
+- Next: voice_server.py (:8000, state machine per §2), then mic hookup in plugin.js.
+
+**STUCK (resolved 2026-09-28 — see below):** RESOLVED 2026-09-28 — the turn drain hung because each
 turn used a one-shot Future: `set_result` captured only the FIRST delta, and every later
 await on the done future instantly replayed that same event, so `message.complete` never
 surfaced. Fix: per-turn `asyncio.Queue` (`_turn_queues`) in agent_bridge.py; reader pushes
