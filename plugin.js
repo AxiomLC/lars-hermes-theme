@@ -492,6 +492,29 @@ function chip(label, value, accent) {
   })
 }
 
+// Connection status dot: "connected ✓" when pluginCtx REST (app backend) answers;
+// "stale ✗" when the app restarted and the backend/context went away.
+function TitlebarLink() {
+  const ok = useQuery({
+    queryKey: ['lars-link'],
+    queryFn: () => (pluginCtx ? pluginCtx.rest('/stats', { timeoutMs: 3000 }) : Promise.reject(new Error('no ctx'))),
+    refetchInterval: 5000,
+    retry: false
+  })
+  const up = !!(ok.data && ok.data.ok)
+  return jsx('span', {
+    title: up ? 'Lars plugin connected to current Hermes backend' : 'STALE — Hermes backend changed; run specs\\Lars_Stack.vbs or reload plugins',
+    style: {
+      fontSize: '10px', fontFamily: JV.mono, cursor: 'default',
+      color: up ? JV.green : JV.amber,
+      textShadow: `0 0 6px ${up ? JV.green : JV.amber}`,
+      border: `1px solid ${JV.edge}`, borderRadius: '3px',
+      padding: '0 5px', whiteSpace: 'nowrap'
+    },
+    children: up ? 'connected ✓' : 'stale ✗'
+  })
+}
+
 function TitlebarUtils() {
   const model = useValue(host.state.model)
   const profile = useValue(host.state.profile)
@@ -655,10 +678,11 @@ function LarsPage({ collapsedAtom, expandedAtom, posAtom, panelAtom, stateAtom, 
     // Mount-scoped via <Contribute> — leaves with the page.
     const titlebarChrome = isHome
       ? jsxs('div', { key: 'titlebar', children: [
-          jsx(Contribute, { area: TITLEBAR_AREAS.left, id: 'lars:titlebar-brand', children:
-            jsx('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' }, children: [
+      jsx(Contribute, { area: TITLEBAR_AREAS.left, id: 'lars:titlebar-brand', children:
+            jsxs('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' }, children: [
               jsx('img', { src: LOGO_DATA, alt: 'Lars', style: { height: '30px', width: 'auto', objectFit: 'contain' } }),
-              jsx('span', { style: { fontSize: '13px', fontWeight: '700', color: 'var(--ui-text-primary)', letterSpacing: '0.08em' }, children: 'Lars' })
+              jsx('span', { style: { fontSize: '13px', fontWeight: '700', color: 'var(--ui-text-primary)', letterSpacing: '0.08em' }, children: 'Lars' }),
+              jsx(TitlebarLink, {})
             ]})
           }),
           jsx(Contribute, { area: TITLEBAR_AREAS.right, id: 'lars:titlebar-utils', children: jsx(TitlebarUtils, {}) })

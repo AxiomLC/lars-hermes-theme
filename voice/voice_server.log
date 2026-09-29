@@ -1,0 +1,56 @@
+2026-09-29 09:12:51,864 pocket_tts.models.tts_model: Loading model from config at C:\Users\Admin\AppData\Local\hermes\desktop-plugins\lars\voice\.venv\Lib\site-packages\pocket_tts\config\english_2026-09.yaml...
+2026-09-29 09:12:52,008 pocket_tts.modules.text_conditioner: Loading tokenizers json from hf://kyutai/pocket-tts-without-voice-cloning/languages/english_2026-09/tokenizer.json@00eac05ed3d16bdc3f6b5d598874019c34a89214
+2026-09-29 09:12:52,495 httpx: HTTP Request: GET https://huggingface.co/api/agent-harnesses "HTTP/1.1 200 OK"
+2026-09-29 09:12:53,668 pocket_tts.models.tts_model: Loading TTSModel weights from hf://kyutai/pocket-tts/languages/english_2026-09/model.safetensors@983151f13aaeab1b13c1e5e3c2c383d49a9edf3f
+2026-09-29 09:12:54,001 httpx: HTTP Request: HEAD https://huggingface.co/kyutai/pocket-tts/resolve/983151f13aaeab1b13c1e5e3c2c383d49a9edf3f/languages/english_2026-09/model.safetensors "HTTP/1.1 401 Unauthorized"
+2026-09-29 09:12:55,085 root: TTS Model loaded successfully. Its size is 438.0 MB
+2026-09-29 09:12:55,208 pocket_tts.models.tts_model: starting timer now!
+2026-09-29 09:12:55,286 pocket_tts.utils.utils: Prompting text took 62 ms
+2026-09-29 09:12:55,402 lars.voice: engines loaded in 7.1s (tts warmup incl.)
+2026-09-29 09:14:22,198 pocket_tts.models.tts_model: Loading model from config at C:\Users\Admin\AppData\Local\hermes\desktop-plugins\lars\voice\.venv\Lib\site-packages\pocket_tts\config\english_2026-09.yaml...
+2026-09-29 09:14:22,309 pocket_tts.modules.text_conditioner: Loading tokenizers json from hf://kyutai/pocket-tts-without-voice-cloning/languages/english_2026-09/tokenizer.json@00eac05ed3d16bdc3f6b5d598874019c34a89214
+2026-09-29 09:14:23,488 pocket_tts.models.tts_model: Loading TTSModel weights from hf://kyutai/pocket-tts/languages/english_2026-09/model.safetensors@983151f13aaeab1b13c1e5e3c2c383d49a9edf3f
+2026-09-29 09:14:23,908 httpx: HTTP Request: HEAD https://huggingface.co/kyutai/pocket-tts/resolve/983151f13aaeab1b13c1e5e3c2c383d49a9edf3f/languages/english_2026-09/model.safetensors "HTTP/1.1 401 Unauthorized"
+2026-09-29 09:14:24,093 root: TTS Model loaded successfully. Its size is 438.0 MB
+2026-09-29 09:14:24,123 pocket_tts.models.tts_model: starting timer now!
+2026-09-29 09:14:24,203 pocket_tts.utils.utils: Prompting text took 78 ms
+2026-09-29 09:14:24,326 lars.voice: engines loaded in 4.9s (tts warmup incl.)
+2026-09-29 09:40:39,465 pocket_tts.models.tts_model: Loading model from config at C:\Users\Admin\AppData\Local\hermes\desktop-plugins\lars\voice\.venv\Lib\site-packages\pocket_tts\config\english_2026-09.yaml...
+2026-09-29 09:40:39,599 pocket_tts.modules.text_conditioner: Loading tokenizers json from hf://kyutai/pocket-tts-without-voice-cloning/languages/english_2026-09/tokenizer.json@00eac05ed3d16bdc3f6b5d598874019c34a89214
+2026-09-29 09:40:40,774 pocket_tts.models.tts_model: Loading TTSModel weights from hf://kyutai/pocket-tts/languages/english_2026-09/model.safetensors@983151f13aaeab1b13c1e5e3c2c383d49a9edf3f
+2026-09-29 09:40:41,219 httpx: HTTP Request: HEAD https://huggingface.co/kyutai/pocket-tts/resolve/983151f13aaeab1b13c1e5e3c2c383d49a9edf3f/languages/english_2026-09/model.safetensors "HTTP/1.1 401 Unauthorized"
+2026-09-29 09:40:42,240 root: TTS Model loaded successfully. Its size is 438.0 MB
+2026-09-29 09:40:42,287 pocket_tts.models.tts_model: starting timer now!
+2026-09-29 09:40:42,374 pocket_tts.utils.utils: Prompting text took 78 ms
+2026-09-29 09:40:42,501 lars.voice: engines loaded in 7.3s (tts warmup incl.)
+2026-09-29 09:40:43,137 pocket_tts.models.tts_model: Average generation step time: 53 ms
+2026-09-29 09:41:42,740 pocket_tts.models.tts_model: Loading model from config at C:\Users\Admin\AppData\Local\hermes\desktop-plugins\lars\voice\.venv\Lib\site-packages\pocket_tts\config\english_2026-09.yaml...
+2026-09-29 09:41:42,856 pocket_tts.modules.text_conditioner: Loading tokenizers json from hf://kyutai/pocket-tts-without-voice-cloning/languages/english_2026-09/tokenizer.json@00eac05ed3d16bdc3f6b5d598874019c34a89214
+2026-09-29 09:41:44,212 pocket_tts.models.tts_model: Loading TTSModel weights from hf://kyutai/pocket-tts/languages/english_2026-09/model.safetensors@983151f13aaeab1b13c1e5e3c2c383d49a9edf3f
+2026-09-29 09:41:44,627 httpx: HTTP Request: HEAD https://huggingface.co/kyutai/pocket-tts/resolve/983151f13aaeab1b13c1e5e3c2c383d49a9edf3f/languages/english_2026-09/model.safetensors "HTTP/1.1 401 Unauthorized"
+2026-09-29 09:41:44,940 root: TTS Model loaded successfully. Its size is 438.0 MB
+2026-09-29 09:41:44,992 pocket_tts.models.tts_model: starting timer now!
+2026-09-29 09:41:45,178 pocket_tts.utils.utils: Prompting text took 171 ms
+2026-09-29 09:41:45,364 lars.voice: engines loaded in 5.9s (tts warmup incl.)
+2026-09-29 09:42:21,071 pocket_tts.models.tts_model: Loading model from config at C:\Users\Admin\AppData\Local\hermes\desktop-plugins\lars\voice\.venv\Lib\site-packages\pocket_tts\config\english_2026-09.yaml...
+2026-09-29 09:42:21,198 pocket_tts.modules.text_conditioner: Loading tokenizers json from hf://kyutai/pocket-tts-without-voice-cloning/languages/english_2026-09/tokenizer.json@00eac05ed3d16bdc3f6b5d598874019c34a89214
+2026-09-29 09:42:22,339 pocket_tts.models.tts_model: Loading TTSModel weights from hf://kyutai/pocket-tts/languages/english_2026-09/model.safetensors@983151f13aaeab1b13c1e5e3c2c383d49a9edf3f
+2026-09-29 09:42:22,719 httpx: HTTP Request: HEAD https://huggingface.co/kyutai/pocket-tts/resolve/983151f13aaeab1b13c1e5e3c2c383d49a9edf3f/languages/english_2026-09/model.safetensors "HTTP/1.1 401 Unauthorized"
+2026-09-29 09:42:22,920 root: TTS Model loaded successfully. Its size is 438.0 MB
+2026-09-29 09:42:22,952 pocket_tts.models.tts_model: starting timer now!
+2026-09-29 09:42:23,049 pocket_tts.utils.utils: Prompting text took 93 ms
+2026-09-29 09:42:23,170 lars.voice: engines loaded in 5.1s (tts warmup incl.)
+2026-09-29 09:42:23,652 pocket_tts.models.tts_model: Average generation step time: 46 ms
+2026-09-29 09:42:40,327 lars.voice: client connected (origin='')
+2026-09-29 09:42:40,853 lars.bridge: resumed lars session stored=20260927_192941_c1c901 live=4efdcf33
+2026-09-29 09:42:40,938 lars.voice: client disconnected
+2026-09-29 09:43:00,690 lars.voice: client connected (origin='')
+2026-09-29 09:43:01,071 lars.bridge: resumed lars session stored=20260927_192941_c1c901 live=32a6495f
+2026-09-29 09:43:01,511 lars.bridge: resumed lars session stored=20260927_192941_c1c901 live=32a6495f
+2026-09-29 09:43:13,914 pocket_tts.models.tts_model: starting timer now!
+2026-09-29 09:43:14,162 pocket_tts.utils.utils: Prompting text took 202 ms
+2026-09-29 09:43:14,525 lars.voice: reply: 'Hello, Dave — good to hear you.'
+2026-09-29 09:43:14,532 lars.voice: client disconnected
+2026-09-29 09:43:16,200 pocket_tts.models.tts_model: Average generation step time: 72 ms
+2026-09-29 09:43:16,201 pocket_tts.utils.utils: Waiting for mimi decoder to finish took 0 ms
+2026-09-29 09:43:16,201 pocket_tts.models.tts_model: Generated: 2160 ms of audio in 2281 ms so 0.95x faster than real-time

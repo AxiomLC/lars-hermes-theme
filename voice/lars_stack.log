@@ -1,0 +1,5 @@
+9/29/2026 11:05:32 AM  installed watcher to Startup
+9/29/2026 11:05:32 AM  removed old Hermes_Gateway.vbs from Startup (gateway is manual now)
+9/29/2026 11:11:35 AM  hermes backend on port 61462 (was: ) -> refreshing stack
+9/29/2026 11:11:50 AM  dashboard :9119 relaunched (token-authed, fresh backend 61462)
+9/29/2026 11:12:02 AM  voice server :8000 relaunched
