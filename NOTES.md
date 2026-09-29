@@ -6,53 +6,67 @@ when a decision changes.
 
 ---
 
-## HANDOFF — 2026-09-29 13:06 (Lars voice/stack, watcher v2 live)
+## NEXT BIG FIX — FULL STREAMING VOICE (designed, not yet built) — 2026-09-28 ~22:30
 
-**ROOT CAUSE of 2026-09-29 outage (fixed):** dashboards launched by the watcher
-(`hermes.cmd`) had NO `HERMES_HOME` in env → dashboard scanned the wrong home →
-mounted ZERO plugins ("Plugin not found") → utility strip/voice buttons dead.
-Fix: launch :9119 with `HERMES_HOME=%LOCALAPPDATA%\hermes` + bridge token; do NOT
-set HERMES_PROFILE. Verified: hermes.cmd-launched dashboard mounts lars with that env.
+**Design is DONE and committed: `specs/voice-streaming-design.md`. Pick it up in a fresh
+session.** Summary of what it delivers and how:
 
-**Lars_Stack.vbs v2 (specs/, live as cscript + installed at logon):**
-- ONLOGON trigger via schtasks (Access denied non-elevated) → fallback installed:
-  HKCU Run key `LarsStackWatcher` → Startup\Lars_Stack.vbs (works, no elevation).
-- Trigger: WMI `__InstanceCreationEvent WITHIN 3` on python.exe/Hermes.exe start —
-  PROVEN working from vbs (probe received real events). Subscribe retries ×3, then
-  poll-only mode. Poll safety net every 15 s regardless.
-- Ensure = verify first, kill+relaunch only if broken:
-  :9119 must listen AND mount /api/plugins/lars/stats (Bearer bridge token);
-  relaunch re-checks mount up to 5×10 s (first check can be too early).
-  :8000 launch only if not listening (30–60 s TTS warmup).
-- Logs action/success/failure to voice\lars_stack.log. Mutex: lock + live wscript
-  count; unique tmpfile per instance (lars_out_<IID>.txt — shared name raced).
-  VBS quoting: quotes double as "", never \".
-- Old watcher's false backend-port detection (killed good dashboard 12:20) removed
-  entirely — no more serve --port 0 sniffing.
+1. **Mic ON = true streaming.** The page becomes a dumb mic: every AudioWorklet Int16
+   frame goes straight to :8000 over WS (no local buffering, no batch whisper in the
+   page). The :8000 server ALREADY implements the whole continuous pipeline (VAD, state
+   machine, streaming zipformer, per-sentence TTS, barge-in mechanics) — that's why this
+   is mostly page-side deletion + server-side small changes.
+2. **Fred-AI turn-taking:** server VAD + **2.0 s silence** ends the user's turn
+   automatically → Lars responds with no button press. Continuous loop
+   LISTENING→PROCESSING→SPEAKING→LISTENING until mic OFF.
+3. **STT = hybrid:** streaming zipformer runs the loop/live captions; after the 2 s
+   silence the server re-transcribes the full turn buffer with faster-whisper (accuracy
+   parity with today) and prefers its text. ~3–5 s to first spoken audio.
+4. **Barge-in:** mic keeps streaming during SPEAKING; sustained user speech (≥200 ms,
+   echo guard vs Lars hearing himself) → tts_stop cancels Pocket-TTS + gateway
+   `session.interrupt` → page flushes scheduled audio buffers → user's words are already
+   in the new turn. Full step-by-step in the spec.
+5. **Attach-per-turn (SHIPPED TODAY, below):** the same research found the session-lease
+   mechanism behind "This chat is open somewhere else" — fixed the same day (see next
+   entry); voice now releases the session lease between turns, so core Sessions chat and
+   the voice module co-exist on one Lars session.
 
-**BOOT-SHAPE DISCOVERY (17:50):** the desktop app's boot VARIES — some boots it
-spawns dashboard :9119 itself; other boots it spawns a serve backend on a DYNAMIC
-port (60149 today) and :9119 never appears. gui.log shows live tui_gateway either
-way. So the manual starter (start_lars_stack.cmd, repo root) now: trusts ONLY real
-HTTP 200 on :9119 (netstat zombies lie), kills a zombie listener precisely
-(Get-NetTCPConnection, NOT findstr — it once matched 7 unrelated pids), fallback-
-launches :9119 with HERMES_HOME+token, starts :8000 if down, verifies mount.
-NEVER kill a healthy :9119 — it hosts the chat gateway (killing it killed chat).
-USER FLOW: start Hermes -> double-click start_lars_stack.cmd (or
-cmd /c "%LOCALAPPDATA%\hermes\desktop-plugins\lars\start_lars_stack.cmd") -> wait
-for OK lines -> test voice. Browser URL: http://127.0.0.1:9119 (not localhost).
+---
 
-**VERIFY (in order):** `tasklist | grep -ic cscript` (=1) →
-`netstat -ano | grep -E ':(9119|8000)\s.*LISTEN'` (=2 lines) →
-`tail -5 voice/lars_stack.log` (ok lines every ~15 s).
-Manual 9119 check: `curl -H "Authorization: Bearer lars-voice-bridge-2026" http://127.0.0.1:9119/api/plugins/lars/stats` → JSON = plugin mounted.
+## Voice module — PARTIAL WORKING BETA 2026-09-28 ~22:00 (machine-1, this repo's main)
 
-**OPEN:** schtasks ONLOGON task creation needs elevation (fallback in use);
-optional: create task once elevated to also cover... Run key is sufficient.
+**WORKING LIVE (Dave-tested):** mic → local faster-whisper STT (plugin_api `/transcribe`) →
+transcript → `typed` event → :8000 → bridge → REAL lars session → streaming reply text →
+per-sentence Pocket-TTS → PCM back → orb SPEAKS. Typed keyboard entry: same path, works.
+This is the hybrid: STT = local whisper in the app; brain+voice = :8000 service.
 
-**NEXT:** 1) user re-test plugin UI (⌘K reload) 2) reboot test (Run key autostart +
-watcher boot pass) 3) commit+push each verified step. Voice-AI-README.md top banner
-= canonical cross-machine handoff.
+**How the pieces start (all now token-safe):**
+- :9119 dashboard — launched at login by Startup VBS AND by the desktop app itself on
+  restart (that was the recurring token-less 403: the APP spawns it, not just the VBS).
+  Fix: `setx HERMES_DASHBOARD_SESSION_TOKEN lars-voice-bridge-2026` (user env var) — every
+  launcher inherits it. VBS also sets it explicitly. Repo VBS copy:
+  dashboard-service/Hermes_Dashboard.vbs (outside this repo, on disk).
+- :8000 voice server — run DETACHED: `voice\.venv\Scripts\python.exe -u voice_server.py`
+  (worked dir voice/). Dies if started as an agent-session background shell.
+- Bridge reconnects forever w/ backoff now (single-shot reconnect caused "Lars silent").
+
+**Key gotchas found this session (all fixed):**
+- torch 2.14+cpu needs VC++ redist ≥14.4x (WinError 1114 c10.dll) — updated via winget.
+- Desktop AudioContext ignores the 16k getUserMedia constraint → server now honors the
+  page-declared `audio_format.rate` and resamples (48k→16k) before VAD/STT.
+- Electron plugin-page origin is file:// — server origin check widened (token still gates).
+- LarsBridge one-shot future bug → per-turn asyncio.Queue (machine-2 fix, now on main).
+
+**KNOWN LIMITATION — FIXED 2026-09-28 ~22:30 (ATTACH-PER-TURN):** the "open somewhere
+else" error is a gateway session LEASE claimed on first prompt turn and held until
+session.close. agent_bridge now closes the session after every voice turn and resumes
+(lazy, close_on_disconnect) at the start of the next one — lease free between turns, so
+core Sessions chat and voice co-exist. Verified: resume→close→resume cycle, fresh live id
+each turn. Fresh chat should still live-test UI co-existence.
+
+**Debt to burn before production:** debug logging + debug_last.wav dump in voice_server.py;
+LARS_VOICE_TEST=1 (10 s window) → flip to 0 (60 s); wake-word "Hey Lars" untested live;
+barge-in untested live; parallel-editor collisions on plugin.js (two agents, one file).
 
 ---
 

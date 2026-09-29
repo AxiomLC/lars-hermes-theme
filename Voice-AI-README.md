@@ -3,8 +3,28 @@
 **Branch:** machine-2 · **Status:** agreed design, supersedes rev. 1
 **Build doc:** Hermes Local Voice Core — Windows 11, CPU-only, plugin-page voice for the Div 7 orb.
 
-> **BUILD STATE 2026-09-28 (machine-2, `voice/` + plugin.js) — WIRED & WIRE-VERIFIED, live testing.**
-> Read this first if you're picking up the build on the other machine:
+> **NEXT BIG FIX (designed 2026-09-28 ~22:30, NOT yet built): full streaming voice.**
+> Design committed: `specs/voice-streaming-design.md` — mic ON = continuous PCM to :8000
+> (page becomes a dumb mic), Fred-AI 2.0s-silence server VAD turn-taking (auto-respond,
+> no button), hybrid STT (streaming zipformer loop + whisper re-transcribe of the turn
+> buffer), and live barge-in (sustained-speech guard → tts_stop + session.interrupt →
+> page flushes buffers). The server already implements ~all of it; changes are mostly
+> page-side. **Also shipped same day: attach-per-turn** — agent_bridge closes the session
+> after each voice turn (leases are claimed lazily per prompt turn and only released on
+> session.close, per Hermes source), killing the "This chat is open somewhere else"
+> error; core Sessions chat and the voice module now co-exist on one Lars session.
+>
+> **BUILD STATE 2026-09-28 ~22:00 (machine-1 `main`) — PARTIAL WORKING BETA, live-tested.**
+> Hybrid build: **STT = local faster-whisper** via plugin_api `/transcribe` (in-app, works);
+> **brain+TTS = :8000 voice server** (bridge → real lars session → per-sentence pocket-tts →
+> PCM to page). Dave-verified live: mic→STT→Lars replies **out loud**; typed entry works.
+> Known limitation: the bridge holds the lars session open, so typing in core Sessions on
+> the same session errors "open somewhere else" (handover design pending).
+> Token for :9119 is now a **user env var** (`HERMES_DASHBOARD_SESSION_TOKEN`) because the
+> desktop app itself re-spawns :9119 on restart — VBS-only env was insufficient.
+> Server resamples page-declared capture rate (Electron mics give 44.1/48k, not 16k).
+>
+> **Earlier machine-2 banner (design provenance):**
 >
 > **Installed & working (machine-2, all verified with real runs — do not re-verify):**
 > - Venv `voice/.venv` (3.11.16, isolated): torch 2.14.0+cpu, torchaudio 2.11.0+cpu,

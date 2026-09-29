@@ -115,9 +115,19 @@ class LarsBridge:
                         q.put_nowait(evout)
         except websockets.ConnectionClosed:
             log.warning("bridge WS closed; reconnecting")
-            await asyncio.sleep(2)
-            with contextlib.suppress(Exception):
-                await self._attach()
+            # Reconnect with backoff FOREVER — the gateway restarts (app restarts,
+            # crashes); a single-shot reconnect killed the bridge for the rest of
+            # the server's life (2026-09-28 live failure: STT fine, Lars silent).
+            delay = 1.0
+            while True:
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30)
+                try:
+                    await self._attach()
+                    log.info("bridge re-attached, session %s", self.session_id)
+                    return
+                except Exception as e:
+                    log.warning("re-attach failed: %s", e)
         except Exception:
             log.exception("bridge reader died")
 
@@ -133,7 +143,8 @@ class LarsBridge:
             self.session_id = res.get("session_id")
             log.info("created lars session %s (stored %s)", self.session_id, res.get("stored_session_id"))
             return
-        r = await self._rpc("session.resume", {"session_id": sid, "profile": self.profile})
+        r = await self._rpc("session.resume", {"session_id": sid, "profile": self.profile,
+                                               "lazy": True, "close_on_disconnect": True})
         res = r.get("result") or {}
         live = res.get("session_id")
         self.session_id = live or sid
@@ -151,8 +162,13 @@ class LarsBridge:
         self._coro(self._interrupt(), timeout=10)
 
     async def _send(self, text, on_delta, on_done, on_error):
-        if not self.session_id:
-            await self._resume_session()
+        # ATTACH-PER-TURN: resume acquires nothing (leases are claimed lazily by
+        # the first prompt turn and released only at session.close — see specs/
+        # voice-streaming-design.md). We resume at turn start and close at turn
+        # end, so the lease is free between turns and the core Sessions UI can
+        # use the same session without "open somewhere else" (SESSION_NOT_OWNED).
+        self.session_id = None
+        await self._resume_session()
         turn_q: asyncio.Queue = asyncio.Queue()
         self._turn_queues.append(turn_q)
         full = []
@@ -184,6 +200,13 @@ class LarsBridge:
         finally:
             with contextlib.suppress(ValueError):
                 self._turn_queues.remove(turn_q)
+            # Release the session lease so the core Sessions UI can use the same
+            # session between voice turns (stored row stays resumable).
+            with contextlib.suppress(Exception):
+                if self.session_id:
+                    await self._rpc("session.close", {"session_id": self.session_id,
+                                                      "profile": self.profile}, timeout=10)
+                    log.info("session closed (lease released): %s", self.session_id)
             if on_done:
                 on_done("".join(full))
 

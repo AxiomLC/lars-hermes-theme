@@ -93,8 +93,8 @@ const JV = {
 const VOICE_WS = 'ws://127.0.0.1:8000/ws/voice?token=lars-voice-dev-token'
 
 function createVoiceLink(stateAtom, onText) {
-  const L = { ws: null, ctx: null, node: null, stream: null, open: false,
-              playing: false, srcs: [], nextAt: 0, rate: 24000 }
+  const L = { ctx: null, node: null, stream: null, open: false, buf: [],
+              speechAt: null, submitting: false }
   const workletCode =
     'class PCMCap extends AudioWorkletProcessor {' +
     '  process(inputs){' +
@@ -105,105 +105,169 @@ function createVoiceLink(stateAtom, onText) {
     '    return true } }' +
     'registerProcessor("lars-pcm", PCMCap)'
   L.workletURL = URL.createObjectURL(new Blob([workletCode], { type: 'application/javascript' }))
-
   L.setState = s => stateAtom.set(s)
 
-  L.onFrame = ev => {
-    const d = JSON.parse(ev.data)
-    if (d.event === 'audio_format') L.rate = d.rate
-    else if (d.event === 'state') L.setState(d.state === 'listening' ? 'hot' : d.state)
-    else if (d.event === 'text') {
-      if (d.role === 'user' && d.text) L.setState('user')
-      if (d.role === 'lars') L.setState('lars')
-      if (onText) onText(d.role, d.text || '')
-    } else if (d.event === 'done') L.setState('hot')
-    else if (d.event === 'interrupted' || d.event === 'timeout') L.setState('hot')
-    else if (d.event === 'error') { L.setState('deaf'); if (onText) onText('err', d.msg) }
-  }
-
-  L.start = () => {
-    if (L.open) return
-    L.open = true
-    L.ws = new WebSocket(VOICE_WS)
-    L.ws.binaryType = 'arraybuffer'
-    // queue anything sent before the socket opens (CONNECTING-state guard)
-    L.q = []
-    L.ws.onopen = () => {
-      L.q.forEach(m => L.ws.send(m))
-      L.q = []
-    }
-    L.ws.onmessage = ev => {
-      if (ev.data instanceof ArrayBuffer) L.playChunk(ev.data)
-      else L.onFrame(ev)
-    }
-    L.ws.onclose = () => { L.open = false; L.setState('deaf'); L.stopCapture() }
-  }
-
+  // WS to the voice service (:8000) — carries the typed transcript to the real
+  // Lars session and brings back streamed Pocket-TTS audio + reply text.
   L.sendJSON = obj => {
     const s = JSON.stringify(obj)
     if (L.ws && L.ws.readyState === 1) L.ws.send(s)
-    else if (L.ws && L.ws.readyState === 0) L.q.push(s)   // still CONNECTING
+    else if (L.ws && L.ws.readyState === 0) { L.q = L.q || []; L.q.push(s) }
+  }
+  L.onFrame = ev => {
+    if (ev.data instanceof ArrayBuffer) { L.playChunk(ev.data); return }
+    let d; try { d = JSON.parse(ev.data) } catch (e) { return }
+    if (d.event === 'audio_format') L.rate = d.rate
+    else if (d.event === 'text') {
+      if (d.role === 'lars') { L.setState('lars'); if (onText) onText('lars', d.text || '') }
+    } else if (d.event === 'state') {
+      if (d.state !== 'processing' || !L.open) L.setState(d.state === 'listening' ? 'hot' : d.state)
+    } else if (d.event === 'done') { if (!L.open) L.setState('hot') }
+    else if (d.event === 'error') { if (onText) onText('err', d.msg || 'voice error') }
+  }
+  L.ensureWs = () => {
+    if (L.ws && (L.ws.readyState === 0 || L.ws.readyState === 1)) return
+    try {
+      L.ws = new WebSocket(VOICE_WS)
+      L.ws.binaryType = 'arraybuffer'
+      L.ws.onmessage = ev => { try { L.onFrame(ev) } catch (e) {} }
+      L.ws.onopen = () => { (L.q || []).forEach(s => { try { L.ws.send(s) } catch (e) {} }); L.q = [] }
+      L.ws.onclose = () => { if (onText) onText('err', 'voice service :8000 not reachable (TTS off)') }
+    } catch (e) { if (onText) onText('err', 'ws: ' + e.message) }
+  }
+  L.rate = 24000
+  L.playChunk = ab => {
+    try {
+      if (!L.ctxP) L.ctxP = new AudioContext({ sampleRate: L.rate })
+      if (L.ctxP.state === 'suspended') L.ctxP.resume()
+      const i16 = new Int16Array(ab)
+      if (!i16.length) return
+      const buf = L.ctxP.createBuffer(1, i16.length, L.rate)
+      const ch = buf.getChannelData(0)
+      for (let i = 0; i < i16.length; i++) ch[i] = i16[i] / 32768
+      const src = L.ctxP.createBufferSource()
+      src.buffer = buf
+      src.connect(L.ctxP.destination)
+      const at = Math.max(L.ctxP.currentTime, L.nextAt || 0)
+      src.start(at)
+      L.nextAt = at + buf.duration
+      L.srcs = L.srcs || []
+      L.srcs.push(src)
+      src.onended = () => { L.srcs = L.srcs.filter(s => s !== src); if (!L.srcs.length) L.nextAt = 0 }
+    } catch (e) { console.log('[lars-voice] playChunk error:', e.message) }
   }
 
-  L.stop = () => {
+  // Press once = start listening continuously. Local faster-whisper (via the
+  // plugin_api /transcribe backend) transcribes the utterance and auto-sends it
+  // into the active chat when your voice ends (see L.onPcm VAD). No :8000 service.
+  L.start = () => {
+    if (L.open) return
+    console.log('[lars-voice] start()')
+    L.open = true
+    L.buf = []
+    L.speechAt = null
+    L.submitting = false
+    L.setState('hot')
+  }
+
+  L.stop = async () => {
     L.stopCapture()
-    if (L.ws) { try { L.ws.close() } catch (e) {} L.ws = null }
     L.open = false
     L.setState('deaf')
+    await L.submit()
   }
 
   L.startCapture = async () => {
     if (L.stream) return
+    console.log('[lars-voice] startCapture()')
     try {
+      console.log('[lars-voice] mediaDevices?', typeof navigator.mediaDevices,
+        typeof (navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+        '| AudioContext?', typeof AudioContext)
       L.stream = await navigator.mediaDevices.getUserMedia({ audio: {
         channelCount: 1, sampleRate: 16000, echoCancellation: true,
         noiseSuppression: true, autoGainControl: true } })
       L.ctx = new AudioContext({ sampleRate: 16000 })
       await L.ctx.audioWorklet.addModule(L.workletURL)
       L.node = new AudioWorkletNode(L.ctx, 'lars-pcm')
-      L.node.port.onmessage = e => {
-        if (L.ws && L.ws.readyState === 1) { try { L.ws.send(e.data) } catch (err) {} }
-      }
+      L.node.port.onmessage = L.onPcm
       const src = L.ctx.createMediaStreamSource(L.stream)
       src.connect(L.node)  // node is a sink — do NOT connect to destination
-      L.sendJSON({ event: 'audio_format', rate: L.ctx.sampleRate })
-      L.sendJSON({ event: 'listen' })
-    } catch (e) { if (onText) onText('err', 'mic: ' + e.message); L.setState('deaf') }
+      console.log('[lars-voice] capture RUNNING')
+      L.setState('hot')
+    } catch (e) { console.log('[lars-voice] capture error:', e.message); if (onText) onText('err', 'mic: ' + e.message); L.setState('deaf') }
+  }
+
+  // Int16 16k mono PCM frames from the worklet. Buffer them + run a tiny RMS VAD
+  // so we can detect when the user STOPS speaking (~700ms silence) -> auto submit.
+  L.onPcm = e => {
+    if (!L.open) return
+    let frame
+    try { frame = new Int16Array(e.data) } catch (err) { return }
+    if (!frame.length) return
+    L.buf.push(frame)
+    let sum = 0
+    for (let i = 0; i < frame.length; i++) sum += frame[i] * frame[i]
+    const rms = Math.sqrt(sum / frame.length) / 32768
+    const now = Date.now()
+    if (rms > 0.02) {
+      L.speechAt = now
+      if (L.speak !== true) { L.speak = true; console.log('[lars-voice] speech start') }
+    } else if (L.speechAt && now - L.speechAt > 700) {
+      console.log('[lars-voice] voice-end (silence 700ms)')
+      L.speechAt = null
+      L.submit()
+    }
+  }
+
+  // Transcribe the captured utterance via the local plugin_api /transcribe
+  // backend (faster-whisper, offline) and push it into the active chat.
+  L.submit = async () => {
+    if (L.submitting) return
+    const frames = L.buf
+    L.buf = []
+    if (!frames || !frames.length) return
+    try {
+      const total = frames.reduce((n, a) => n + a.length, 0)
+      if (total < 3200) { console.log('[lars-voice] ignored <200ms blip'); return }
+      const pcm = new Int16Array(total)
+      let o = 0
+      for (const a of frames) { pcm.set(a, o); o += a.length }
+      const bytes = new Uint8Array(pcm.buffer.slice(0, pcm.byteLength))
+      const CH = 0x8000
+      let bin = ''
+      for (let i = 0; i < bytes.length; i += CH)
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + CH, bytes.length)))
+      if (!pluginCtx) { if (onText) onText('err', 'no plugin ctx'); return }
+      L.submitting = true
+      console.log('[lars-voice] POST /transcribe (pcm bytes=' + bytes.length + ')')
+      const r = await pluginCtx.rest('/transcribe', {
+        method: 'POST', body: { pcm: btoa(bin), rate: 16000 }, timeoutMs: 60000 })
+      L.submitting = false
+      const text = ((r && r.text) || '').trim()
+      console.log('[lars-voice] transcript =>', JSON.stringify(text))
+      if (!text) { if (onText) onText('err', (r && r.error) || 'no speech heard'); return }
+      if (onText) onText('user', text)
+      // Send the transcript to the voice service: it drives the REAL Lars
+      // session (bridge) and streams Pocket-TTS reply audio back to playChunk.
+      L.ensureWs()
+      L.sendJSON({ event: 'typed', text })
+    } catch (e) { L.submitting = false; console.log('[lars-voice] submit error:', e.message); if (onText) onText('err', 'stt: ' + e.message) }
+  }
+
+  // TYPE box -> same path as voice: the transcript goes to the voice service,
+  // which submits it to the real Lars session and speaks the reply (TTS).
+  L.typed = text => {
+    if (!text) return
+    if (onText) onText('user', text)
+    L.ensureWs()
+    L.sendJSON({ event: 'typed', text })
   }
 
   L.stopCapture = () => {
     if (L.stream) { L.stream.getTracks().forEach(t => t.stop()); L.stream = null }
     if (L.node) { try { L.node.disconnect() } catch (e) {} L.node = null }
     if (L.ctx) { try { L.ctx.close() } catch (e) {} L.ctx = null }
-  }
-
-  L.playChunk = ab => {
-    if (!L.ctxP) L.ctxP = new AudioContext({ sampleRate: 24000 })
-    const n = new Int16Array(ab).length
-    const buf = L.ctxP.createBuffer(1, n, L.rate)
-    const ch = buf.getChannelData(0)
-    const i16 = new Int16Array(ab)
-    for (let i = 0; i < n; i++) ch[i] = i16[i] / 32768
-    const src = L.ctxP.createBufferSource()
-    src.buffer = buf
-    src.connect(L.ctxP.destination)
-    const at = Math.max(L.ctxP.currentTime, L.nextAt)
-    src.start(at)
-    L.nextAt = at + buf.duration
-    L.srcs.push(src)
-    src.onended = () => { L.srcs = L.srcs.filter(s => s !== src) }
-  }
-
-  L.bargeIn = () => {
-    // stop all scheduled sources + flush the chain
-    L.srcs.forEach(s => { try { s.stop() } catch (e) {} })
-    L.srcs = []
-    L.nextAt = 0
-    if (L.ws && L.ws.readyState === 1) L.ws.send(JSON.stringify({ event: 'interrupt' }))
-  }
-
-  L.typed = text => {
-    if (L.ws && L.ws.readyState === 1) L.ws.send(JSON.stringify({ event: 'typed', text }))
   }
 
   return L
@@ -415,12 +479,13 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
                       type: 'button',
                       title: 'Talk — toggle hot mic (60 s listening window; off = deaf until "Hey Lars")',
                       onClick: () => {
-                        if (vstate === 'deaf') {
-                          voiceLink.start()
-                          voiceLink.startCapture()   // async; listen sent on stream ready
-                        } else {
-                          voiceLink.stop()
-                        }
+                                              console.log(`[lars-voice] mic click, vstate=${vstate}`)
+                                              if (vstate === 'deaf') {
+                                                voiceLink.start()
+                                                voiceLink.startCapture()   // async; listen sent on stream ready
+                                              } else {
+                                                voiceLink.stop()
+                                              }
                       },
                       style: iconBtn,
                       children: jsx(MicIcon, { on: hot })
@@ -489,29 +554,6 @@ function chip(label, value, accent) {
       jsx('span', { style: { color: JV.dim }, children: label }),
       jsx('span', { style: { color: JV.cyan, textShadow: `0 0 5px ${JV.cyan}` }, children: value })
     ]
-  })
-}
-
-// Connection status dot: "connected ✓" when pluginCtx REST (app backend) answers;
-// "stale ✗" when the app restarted and the backend/context went away.
-function TitlebarLink() {
-  const ok = useQuery({
-    queryKey: ['lars-link'],
-    queryFn: () => (pluginCtx ? pluginCtx.rest('/stats', { timeoutMs: 3000 }) : Promise.reject(new Error('no ctx'))),
-    refetchInterval: 5000,
-    retry: false
-  })
-  const up = !!(ok.data && ok.data.ok)
-  return jsx('span', {
-    title: up ? 'Lars plugin connected to current Hermes backend' : 'STALE — Hermes backend changed; run specs\\Lars_Stack.vbs or reload plugins',
-    style: {
-      fontSize: '10px', fontFamily: JV.mono, cursor: 'default',
-      color: up ? JV.green : JV.amber,
-      textShadow: `0 0 6px ${up ? JV.green : JV.amber}`,
-      border: `1px solid ${JV.edge}`, borderRadius: '3px',
-      padding: '0 5px', whiteSpace: 'nowrap'
-    },
-    children: up ? 'connected ✓' : 'stale ✗'
   })
 }
 
@@ -678,11 +720,10 @@ function LarsPage({ collapsedAtom, expandedAtom, posAtom, panelAtom, stateAtom, 
     // Mount-scoped via <Contribute> — leaves with the page.
     const titlebarChrome = isHome
       ? jsxs('div', { key: 'titlebar', children: [
-      jsx(Contribute, { area: TITLEBAR_AREAS.left, id: 'lars:titlebar-brand', children:
-            jsxs('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' }, children: [
+          jsx(Contribute, { area: TITLEBAR_AREAS.left, id: 'lars:titlebar-brand', children:
+            jsx('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' }, children: [
               jsx('img', { src: LOGO_DATA, alt: 'Lars', style: { height: '30px', width: 'auto', objectFit: 'contain' } }),
-              jsx('span', { style: { fontSize: '13px', fontWeight: '700', color: 'var(--ui-text-primary)', letterSpacing: '0.08em' }, children: 'Lars' }),
-              jsx(TitlebarLink, {})
+              jsx('span', { style: { fontSize: '13px', fontWeight: '700', color: 'var(--ui-text-primary)', letterSpacing: '0.08em' }, children: 'Lars' })
             ]})
           }),
           jsx(Contribute, { area: TITLEBAR_AREAS.right, id: 'lars:titlebar-utils', children: jsx(TitlebarUtils, {}) })

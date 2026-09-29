@@ -7,7 +7,7 @@ Routes:
   GET /stats -> {cpu_percent, ram_mb, hdd_mb, hermes, os, proc_uptime_s, lars_model}
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 router = APIRouter()
 
@@ -158,3 +158,50 @@ def _get_home_size():
     size_mb = round(total / 2 ** 20, 1)
     _home_size_cache = (size_mb, now)
     return size_mb
+
+
+@router.post("/transcribe")
+async def transcribe(request: Request):
+    """POST JSON {pcm: base64(int16 le mono @16k), rate} -> {ok, text} via local Whisper.
+
+    Records through the local faster-whisper backend (no cloud, no key). The desktop
+    plugin captures AudioWorklet PCM in the browser, base64s it, and posts it here.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    pcm_b64 = payload.get("pcm") or ""
+    rate = int(payload.get("rate") or 16000)
+    if not pcm_b64:
+        return {"ok": False, "text": "", "error": "no audio"}
+    try:
+        import base64
+        pcm = base64.b64decode(pcm_b64)
+    except Exception as e:
+        return {"ok": False, "text": "", "error": f"bad-base64: {e}"}
+    if not pcm:
+        return {"ok": False, "text": "", "error": "empty audio"}
+    import io, wave, os, tempfile, time
+    wav_io = io.BytesIO()
+    with wave.open(wav_io, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(max(8000, rate))
+        w.writeframes(pcm)
+    tmp = os.path.join(tempfile.gettempdir(), f"lars_stt_{int(time.time() * 1000)}.wav")
+    try:
+        with open(tmp, "wb") as f:
+            f.write(wav_io.getvalue())
+        from tools.voice_mode import transcribe_recording
+        model = payload.get("model") or None
+        result = transcribe_recording(tmp, model=model)
+        text = str(result.get("transcript") or "").strip()
+        return {"ok": True, "text": text}
+    except Exception as e:
+        return {"ok": False, "text": "", "error": str(e)[:300]}
+    finally:
+        try:
+            os.unlink(tmp)
+        except Exception:
+            pass
