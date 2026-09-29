@@ -6,6 +6,39 @@ when a decision changes.
 
 ---
 
+## HANDOFF — 2026-09-29 12:05 (Lars voice/stack, live-debug)
+
+**WHAT WORKS (verified):**
+- Voice chain end-to-end: mic wav → STT partials → 600 ms endpoint → bridge → streaming
+  reply → per-sentence pocket-tts ('alba', 24 kHz) → PCM to page → done. Typed path too.
+  Probes: profile scratch/typed_probe.py + voice_probe3.py (run with voice/.venv python).
+- **Lars_Stack.vbs watcher** (specs/): event-driven — WMI `__InstanceCreationEvent WITHIN 3`
+  on python.exe/Hermes.exe start (ProcessStartTrace = Access denied even elevated; never use).
+  On wake: finds backend port via HIDDEN powershell (pattern: `cmd /c powershell ... > tmpfile`,
+  window style 0 — **never `sh.Exec`, it flashes visible windows**), relaunches :9119 dashboard
+  (env `HERMES_DASHBOARD_SESSION_TOKEN='lars-voice-bridge-2026'`, `HERMES_PROFILE='hermes-desktop-coder'`)
+  then :8000 voice server (`voice/.venv/Scripts/python.exe -u voice_server.py`). Mutex lock:
+  `%LOCALAPPDATA%\hermes\lars_stack.lock` (stale lock OK if no wscript running). Self-installs
+  to Startup folder; old Hermes_Gateway.vbs deleted (gateway = manual restarts).
+
+**OPEN ISSUES (post-reboot test 12:00):**
+1. **Startup vbs did NOT auto-run at Windows boot** (wscript=0) — cause unknown; manually
+   started works fine. Next: test reboot again / wrap in schtasks logon trigger.
+2. **No `serve --port 0` backend process after reboot** — Hermes.exe (Electron) now connects
+   DIRECTLY to :9119; no dynamic backend port this boot. Watcher's port-detection may be
+   obsolete (or app spawns serve lazily later). Investigate before trusting port logic.
+3. **User reports: utility strip + voice module dead in plugin after reboot.** Services are
+   up NOW (9119+8000 listening, :200). First remedy: ⌘K → Reload desktop plugins, re-test.
+4. Voice server needs 30–60 s after start (TTS warmup) before first turn — probes wait for it.
+
+**VERIFY (in order):** `tasklist | grep -ic wscript` (=1) → `netstat -ano | grep -E ':(9119|8000)\s.*LISTEN'`
+(=2 lines) → `tail -5 voice/lars_stack.log`.
+
+**NEXT:** 1) plugin reload retest 2) resolve #2 (backend shape) 3) fix #1 (boot autostart)
+4) commit+push each verified step. Voice-AI-README.md top banner = canonical cross-machine handoff.
+
+---
+
 ## Handoff — 2026-09-28 16:00 (voice module: wired, live-debug phase)
 
 **Where we are (machine-2, commit b8b9b0d+):** voice server + plugin UI are fully wired and
