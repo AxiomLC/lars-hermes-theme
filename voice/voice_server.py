@@ -85,6 +85,31 @@ class Turn:
         self.speaking = False
         self.tts_stop = threading.Event()
         self.finishing = False
+        self.gen = 0                # turn generation — stale finish tasks check it
+        self.finish_task = None
+        self.heard_speech = False
+        self.silence = 0            # trailing silence samples (16k)
+        self.speech_run = 0         # sustained speech samples while SPEAKING (barge gate)
+        self.last_activity = time.time()  # last VAD-positive frame (idle timer)
+        self.prering = []           # recent pre-barge audio (seed on barge_in)
+        self.prering_n = 0
+
+    def reset(self):
+        """Back to LISTENING with a clean turn state (mic keeps streaming)."""
+        self.gen += 1
+        self.vad = VAD()
+        self.stt_stream = _stt.new_stream()
+        self.buf = []
+        self.fed = 0
+        self.speaking = False
+        self.tts_stop.clear()
+        self.finishing = False
+        self.heard_speech = False
+        self.silence = 0
+        self.speech_run = 0
+        self.prering = []
+        self.prering_n = 0
+        self.last_activity = time.time()
 
     def _resample(self, pcm_i16: np.ndarray) -> np.ndarray:
         pcm = pcm_i16.astype(np.float32) / 32768.0
@@ -107,8 +132,7 @@ class Turn:
         # DEBUG: peak/RMS of every ~1s of incoming audio
         rms = float(np.sqrt(np.mean(pcm ** 2)) + 1e-12)
         self.dbg_peak = max(getattr(self, "dbg_peak", 0.0), float(np.max(np.abs(pcm))))
-        self.dbg_n = getattr(self.dbg_n, "real", 0) if hasattr(self.dbg_n, "real") else 0
-        self.dbg_n += len(pcm)
+        self.dbg_n = getattr(self, "dbg_n", 0) + len(pcm)
         self.dbg_raw = getattr(self, "dbg_raw", None)
         if self.dbg_raw is None:
             self.dbg_raw = pcm_i16
@@ -119,11 +143,32 @@ class Turn:
             self.dbg_n = 0
             self.dbg_peak = 0.0
         speech = self.vad.is_speech(pcm)
+        if speech:
+            self.last_activity = time.time()
+
+        # keep a rolling ~1 s of recent audio for pre-barge seeding
+        self.prering.append(pcm)
+        self.prering_n += len(pcm)
+        while self.prering_n > 16000 and self.prering:
+            self.prering_n -= len(self.prering[0])
+            self.prering.pop(0)
 
         if self.speaking:
-            if speech and config.BARGE_IN:
+            # barge gate: sustained speech (echo guard) while Lars talks
+            if speech:
+                self.speech_run += len(pcm)
+            else:
+                self.speech_run = 0
+            if self.speech_run >= 16 * config.BARGE_MIN_SPEECH_MS and config.BARGE_IN:
                 await self.barge_in()
             return  # while Lars talks, only barge-in matters
+
+        if speech:
+            self.heard_speech = True
+            self.silence = 0
+            self.finish_task = None  # speech resumed — any scheduled finish is moot
+        else:
+            self.silence += len(pcm)
 
         self.buf.append(pcm)
         audio = np.concatenate(self.buf)
@@ -135,22 +180,41 @@ class Turn:
             if partial:
                 _send(self.ws, {"event": "text", "role": "user", "text": partial})
 
-        # 600 ms of trailing silence ends the turn
-        if len(audio) > 16000 * config.ENDPOINT_SILENCE_S and not speech:
-            asyncio.get_event_loop().create_task(self.finish())
+        # TURN_SILENCE_S (2.0 s) of trailing silence after speech ends the turn.
+        # Mic keeps streaming — this only decides when Lars jumps in.
+        if (self.heard_speech and not self.finishing
+                and self.silence >= 16000 * config.TURN_SILENCE_S):
+            self.finishing = True
+            gen = self.gen
+            self.finish_task = asyncio.get_event_loop().create_task(self.finish(gen))
 
-    async def finish(self):
-        if self.finishing:
+    async def finish(self, gen=None):
+        if self.finishing and gen is None:
             return
+        if gen is not None:
+            if self.finishing and getattr(self, "_finish_gen", None) != gen:
+                return
+            self._finish_gen = gen
         self.finishing = True
         try:
+            if gen is not None and gen != self.gen:
+                return  # stale finish (barge-in/reset happened meanwhile)
             audio = np.concatenate(self.buf) if self.buf else np.zeros(0, np.float32)
             self.buf = []
-            if len(audio) < 16000 * 0.3:   # too short to be speech
+            if len(audio) < 16000 * 0.3 or not self.heard_speech:
+                self.heard_speech = False
+                self.silence = 0
+                self.finishing = False
                 return
             text = _stt.finalize(self.stt_stream)
-            log.info("user said: %r", text)
-            if not text.strip():
+            log.info("user said (zipformer): %r", text)
+            if config.HYBRID_STT:
+                wtext = await self._whisper(audio)
+                if wtext:
+                    log.info("user said (whisper): %r", wtext)
+                    text = wtext
+            text = (text or "").strip()
+            if not text:
                 # DEBUG: dump what we heard so it can be analyzed offline
                 raw = getattr(self, "dbg_raw", None)
                 if raw is not None and len(raw) > 1600:
@@ -164,6 +228,7 @@ class Turn:
                     except Exception:
                         log.exception("debug dump failed")
                 _send(self.ws, {"event": "state", "state": "listening"})
+                self.reset()
                 return
             _send(self.ws, {"event": "state", "state": "processing"})
             _send(self.ws, {"event": "text", "role": "user", "text": text})
@@ -174,6 +239,38 @@ class Turn:
                 _send(self.ws, {"event": "error", "msg": "turn failed"})
         finally:
             self.finishing = False
+
+    async def _whisper(self, audio_f32) -> str:
+        """HYBRID STT: re-transcribe the full 16k turn buffer with faster-whisper
+        (plugin_api /transcribe on :9119). 2.5 s budget — never fails the turn."""
+        try:
+            import base64
+            import urllib.request
+            pcm16 = (np.clip(audio_f32, -1, 1) * 32767).astype(np.int16).tobytes()
+            body = json.dumps({"pcm": base64.b64encode(pcm16).decode(),
+                               "rate": 16000}).encode()
+            req = urllib.request.Request(config.WHISPER_URL, data=body,
+                                         headers={"Content-Type": "application/json"})
+            tok = os.environ.get("HERMES_DASHBOARD_SESSION_TOKEN", "")
+            if not tok:
+                try:  # voice server may be launched detached with a stale env —
+                    import winreg  # the USER env var is the fresh session token
+                    tok = winreg.QueryValueEx(winreg.OpenKey(
+                        winreg.HKEY_CURRENT_USER, "Environment"),
+                        "HERMES_DASHBOARD_SESSION_TOKEN")[0]
+                except Exception:
+                    tok = ""
+            if tok:
+                req.add_header("X-Hermes-Session-Token", tok)
+
+            def call():
+                with urllib.request.urlopen(req, timeout=2.5) as r:
+                    return json.loads(r.read().decode()).get("text", "")
+
+            return ((await asyncio.to_thread(call)) or "").strip()
+        except Exception as e:
+            log.info("whisper hybrid unavailable (%s) — using zipformer text", e)
+            return ""
 
     async def run_agent(self, text: str):
         """Bridge → deltas → sentence-chunked TTS → PCM out."""
@@ -217,6 +314,9 @@ class Turn:
             self.tts_stop.clear()
             log.info("reply: %.200r", "".join(full_reply))
             _send(self.ws, {"event": "done"})
+            # CONTINUOUS loop: mic keeps streaming — fresh turn, back to listening
+            self.reset()
+            _send(self.ws, {"event": "state", "state": "listening"})
 
     async def speak(self, text: str):
         """Synthesize one sentence; stream PCM frames to the page as they come."""
@@ -243,11 +343,12 @@ class Turn:
         log.info("barge-in")
         self.tts_stop.set()
         self.session.interrupt()
-        self.speaking = False
-        self.buf = []
-        self.vad = VAD()
-        self.stt_stream = _stt.new_stream()
-        self.finishing = False
+        seed = self.prering
+        self.reset()
+        self.buf = list(seed)       # pre-barge audio seeds the new turn
+        self.fed = sum(len(c) for c in seed)
+        if self.fed:
+            _stt.feed(self.stt_stream, np.concatenate(seed))
         with contextlib.suppress(Exception):
             _send(self.ws, {"event": "interrupted"})
             _send(self.ws, {"event": "state", "state": "listening"})
@@ -289,11 +390,22 @@ async def voice_endpoint(ws: WebSocket, token: str = ""):
     wake_stream = _wake.new_stream()
     turn: Turn | None = None
 
+    def idle_off():
+        """HOT_MIC_IDLE_S of no speech → mic OFF (mic icon re-arms)."""
+        nonlocal state, turn
+        if state == "listening" and turn is not None and not turn.speaking \
+                and time.time() - turn.last_activity > config.HOT_MIC_IDLE_S:
+            log.info("hot-mic idle %.0fs -> off", config.HOT_MIC_IDLE_S)
+            turn = None
+            state = "off"
+            _send(ws, {"event": "state", "state": "off"})
+
     try:
         while True:
             msg = await ws.receive()
             if msg.get("type") == "websocket.disconnect":
                 break
+            idle_off()
             if "bytes" in msg and msg["bytes"]:
                 pcm_i16 = np.frombuffer(msg["bytes"], dtype=np.int16)
                 if state == "hot":
@@ -307,6 +419,7 @@ async def voice_endpoint(ws: WebSocket, token: str = ""):
                         wake_stream = _wake.new_stream()
                 elif state == "listening" and turn is not None:
                     await turn.feed(pcm_i16)
+                    idle_off()
             elif "text" in msg:
                 ev = json.loads(msg["text"])
                 kind = ev.get("event")
@@ -315,10 +428,17 @@ async def voice_endpoint(ws: WebSocket, token: str = ""):
                     if r != cap_rate:
                         log.info("capture rate: %s Hz", r)
                     cap_rate = int(r)
+                    if turn:
+                        turn.rate = cap_rate
                 elif kind in ("listen", "wake"):
+                    # mic icon press (or wake hit): hot mic ON, continuous
                     state = "listening"
                     turn = Turn(ws, session, cap_rate)
                     _send(ws, {"event": "state", "state": "listening"})
+                elif kind == "stop":
+                    state = "off"
+                    turn = None
+                    _send(ws, {"event": "state", "state": "off"})
                 elif kind == "eos":
                     if turn:
                         await turn.finish()

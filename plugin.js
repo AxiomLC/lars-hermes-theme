@@ -120,9 +120,12 @@ function createVoiceLink(stateAtom, onText) {
     if (d.event === 'audio_format') L.rate = d.rate
     else if (d.event === 'text') {
       if (d.role === 'lars') { L.setState('lars'); if (onText) onText('lars', d.text || '') }
+      else if (d.role === 'user' && onText) onText('user', d.text || '')
     } else if (d.event === 'state') {
-      if (d.state !== 'processing' || !L.open) L.setState(d.state === 'listening' ? 'hot' : d.state)
-    } else if (d.event === 'done') { if (!L.open) L.setState('hot') }
+      if (d.state === 'off') { L.setState('deaf') }        // idle timeout — mic icon re-arms
+      else if (d.state !== 'processing' || !L.open) L.setState(d.state === 'listening' ? 'hot' : d.state)
+    } else if (d.event === 'interrupted') { L.bargeIn() }
+    else if (d.event === 'done') { if (!L.open) L.setState('hot') }
     else if (d.event === 'error') { if (onText) onText('err', d.msg || 'voice error') }
   }
   L.ensureWs = () => {
@@ -157,102 +160,66 @@ function createVoiceLink(stateAtom, onText) {
     } catch (e) { console.log('[lars-voice] playChunk error:', e.message) }
   }
 
-  // Press once = start listening continuously. Local faster-whisper (via the
-  // plugin_api /transcribe backend) transcribes the utterance and auto-sends it
-  // into the active chat when your voice ends (see L.onPcm VAD). No :8000 service.
+  // Press once = hot mic ON: every Int16 frame streams to :8000 (dumb mic —
+  // server VAD turn-taking, 2 s silence -> Lars responds, mic keeps streaming;
+  // 10 s idle -> server sends 'off' and the mic icon re-arms). No page VAD,
+  // no /transcribe path — the server does STT + bridge + TTS.
   L.start = () => {
     if (L.open) return
     console.log('[lars-voice] start()')
     L.open = true
-    L.buf = []
-    L.speechAt = null
-    L.submitting = false
     L.setState('hot')
+    L.ensureWs()
+    L.sendJSON({ event: 'listen' })
+    L.startCapture()   // async; PCM flows as soon as the worklet is up
   }
 
-  L.stop = async () => {
+  L.stop = () => {
     L.stopCapture()
     L.open = false
     L.setState('deaf')
-    await L.submit()
+    L.sendJSON({ event: 'stop' })   // server drops the turn, back to 'off'
+  }
+
+  // Barge-in: Lars was interrupted — kill all scheduled/playing TTS chunks now.
+  // Must zero L.nextAt AND stop srcs (future-scheduled chunks would keep talking).
+  L.bargeIn = () => {
+    console.log('[lars-voice] barge-in: flushing', (L.srcs || []).length, 'chunk(s)')
+    ;(L.srcs || []).forEach(s => { try { s.stop() } catch (e) {} })
+    L.srcs = []
+    L.nextAt = 0
+    L.setState('hot')
   }
 
   L.startCapture = async () => {
     if (L.stream) return
     console.log('[lars-voice] startCapture()')
     try {
-      console.log('[lars-voice] mediaDevices?', typeof navigator.mediaDevices,
-        typeof (navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
-        '| AudioContext?', typeof AudioContext)
       L.stream = await navigator.mediaDevices.getUserMedia({ audio: {
-        channelCount: 1, sampleRate: 16000, echoCancellation: true,
+        channelCount: 1, echoCancellation: true,
         noiseSuppression: true, autoGainControl: true } })
-      L.ctx = new AudioContext({ sampleRate: 16000 })
+      // Electron ignores the 16k constraint (44.1/48k) — declare the REAL rate
+      // to the server, which resamples. No forcing the context to 16k either:
+      // a mismatched declaration is what broke STT before.
+      L.ctx = new AudioContext()
       await L.ctx.audioWorklet.addModule(L.workletURL)
       L.node = new AudioWorkletNode(L.ctx, 'lars-pcm')
       L.node.port.onmessage = L.onPcm
       const src = L.ctx.createMediaStreamSource(L.stream)
       src.connect(L.node)  // node is a sink — do NOT connect to destination
-      console.log('[lars-voice] capture RUNNING')
+      const realRate = L.ctx.sampleRate
+      console.log('[lars-voice] capture RUNNING @', realRate, 'Hz')
+      L.sendJSON({ event: 'audio_format', rate: realRate })
       L.setState('hot')
     } catch (e) { console.log('[lars-voice] capture error:', e.message); if (onText) onText('err', 'mic: ' + e.message); L.setState('deaf') }
   }
 
-  // Int16 16k mono PCM frames from the worklet. Buffer them + run a tiny RMS VAD
-  // so we can detect when the user STOPS speaking (~700ms silence) -> auto submit.
+  // Dumb mic: every Int16 frame goes straight to :8000. Drop while CONNECTING
+  // (never queue — stale audio). Server owns VAD, STT, turn-taking.
   L.onPcm = e => {
     if (!L.open) return
-    let frame
-    try { frame = new Int16Array(e.data) } catch (err) { return }
-    if (!frame.length) return
-    L.buf.push(frame)
-    let sum = 0
-    for (let i = 0; i < frame.length; i++) sum += frame[i] * frame[i]
-    const rms = Math.sqrt(sum / frame.length) / 32768
-    const now = Date.now()
-    if (rms > 0.02) {
-      L.speechAt = now
-      if (L.speak !== true) { L.speak = true; console.log('[lars-voice] speech start') }
-    } else if (L.speechAt && now - L.speechAt > 700) {
-      console.log('[lars-voice] voice-end (silence 700ms)')
-      L.speechAt = null
-      L.submit()
-    }
-  }
-
-  // Transcribe the captured utterance via the local plugin_api /transcribe
-  // backend (faster-whisper, offline) and push it into the active chat.
-  L.submit = async () => {
-    if (L.submitting) return
-    const frames = L.buf
-    L.buf = []
-    if (!frames || !frames.length) return
-    try {
-      const total = frames.reduce((n, a) => n + a.length, 0)
-      if (total < 3200) { console.log('[lars-voice] ignored <200ms blip'); return }
-      const pcm = new Int16Array(total)
-      let o = 0
-      for (const a of frames) { pcm.set(a, o); o += a.length }
-      const bytes = new Uint8Array(pcm.buffer.slice(0, pcm.byteLength))
-      const CH = 0x8000
-      let bin = ''
-      for (let i = 0; i < bytes.length; i += CH)
-        bin += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + CH, bytes.length)))
-      if (!pluginCtx) { if (onText) onText('err', 'no plugin ctx'); return }
-      L.submitting = true
-      console.log('[lars-voice] POST /transcribe (pcm bytes=' + bytes.length + ')')
-      const r = await pluginCtx.rest('/transcribe', {
-        method: 'POST', body: { pcm: btoa(bin), rate: 16000 }, timeoutMs: 60000 })
-      L.submitting = false
-      const text = ((r && r.text) || '').trim()
-      console.log('[lars-voice] transcript =>', JSON.stringify(text))
-      if (!text) { if (onText) onText('err', (r && r.error) || 'no speech heard'); return }
-      if (onText) onText('user', text)
-      // Send the transcript to the voice service: it drives the REAL Lars
-      // session (bridge) and streams Pocket-TTS reply audio back to playChunk.
-      L.ensureWs()
-      L.sendJSON({ event: 'typed', text })
-    } catch (e) { L.submitting = false; console.log('[lars-voice] submit error:', e.message); if (onText) onText('err', 'stt: ' + e.message) }
+    if (!L.ws || L.ws.readyState !== 1) return
+    try { L.ws.send(e.data) } catch (err) {}
   }
 
   // TYPE box -> same path as voice: the transcript goes to the voice service,
@@ -477,7 +444,7 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
         children: [
           jsx('button', {
                       type: 'button',
-                      title: 'Talk — toggle hot mic (60 s listening window; off = deaf until "Hey Lars")',
+                      title: 'Talk — toggle hot mic (2 s silence = Lars replies; mic keeps streaming; idle → off; mic icon re-arms)',
                       onClick: () => {
                                               console.log(`[lars-voice] mic click, vstate=${vstate}`)
                                               if (vstate === 'deaf') {
