@@ -112,12 +112,12 @@ Sub EnsureAll
     Else
       Log "failure: dashboard :9119 did not come up"
     End If
-  ElseIf Not LarsMounted() Then
-    Log "action: dashboard :9119 up but lars plugin NOT mounted -> kill + relaunch with HERMES_HOME"
+  ElseIf Not LarsMountedRetry() Then
+    Log "action: dashboard :9119 up but lars plugin NOT mounted (3 checks failed) -> kill + relaunch with HERMES_HOME"
     KillPort 9119
     LaunchDashboard
     Dim tries : tries = 0
-    Do While tries < 5 And Not LarsMounted()
+    Do While tries < 5 And LarsMounted() <> "200"
       WScript.Sleep 10000
       tries = tries + 1
     Loop
@@ -151,10 +151,34 @@ Function PortListening(port)
 End Function
 
 Function LarsMounted()
-  ' GET /api/plugins/lars/stats with bridge token — 200 = plugin mounted
-  LarsMounted = False
-  Dim out : out = PS("try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 -Headers @{Authorization='Bearer lars-voice-bridge-2026'} 'http://127.0.0.1:9119/api/plugins/lars/stats').StatusCode } catch { $_.Exception.Response.StatusCode.value__ }")
-  If out = "200" Then LarsMounted = True
+  ' GET /api/plugins/lars/stats with bridge token.
+  ' Returns "200" (healthy), "refused" (nothing listening), "stall" (up but
+  ' event loop stalled — dashboard stalls up to ~40 s under GIL pressure;
+  ' a stall must NEVER trigger a relaunch).
+  Dim out
+  out = PS("try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 -Headers @{Authorization='Bearer lars-voice-bridge-2026'} 'http://127.0.0.1:9119/api/plugins/lars/stats').StatusCode } catch { if ($_.Exception.Message -match 'Unable to connect') { 'refused' } else { 'stall' } }")
+  If out = "200" Then LarsMounted = "200" Else LarsMounted = out
+End Function
+
+Function LarsMountedRetry()
+  ' 3 checks with 5 s gaps — must see "refused" every time to declare the
+  ' dashboard down; stalls alone never trigger a relaunch.
+  LarsMountedRetry = False
+  Dim n, r, refused : refused = True
+  For n = 1 To 3
+    r = LarsMounted()
+    If r = "200" Then
+      LarsMountedRetry = True
+      Exit Function
+    End If
+    If r <> "refused" Then refused = False
+    If n < 3 Then WScript.Sleep 5000
+  Next
+  If Not refused Then
+    Log "note: dashboard :9119 stalled (event loop under load) — not relaunching"
+  End If
+  LarsMountedRetry = False
+  If Not refused Then LarsMountedRetry = True   ' stalled-but-alive = leave it alone
 End Function
 
 Sub LaunchDashboard
