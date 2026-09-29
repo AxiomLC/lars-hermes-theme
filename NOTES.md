@@ -30,6 +30,18 @@ set HERMES_PROFILE. Verified: hermes.cmd-launched dashboard mounts lars with tha
 - Old watcher's false backend-port detection (killed good dashboard 12:20) removed
   entirely — no more serve --port 0 sniffing.
 
+**BOOT-SHAPE DISCOVERY (17:50):** the desktop app's boot VARIES — some boots it
+spawns dashboard :9119 itself; other boots it spawns a serve backend on a DYNAMIC
+port (60149 today) and :9119 never appears. gui.log shows live tui_gateway either
+way. So the manual starter (start_lars_stack.cmd, repo root) now: trusts ONLY real
+HTTP 200 on :9119 (netstat zombies lie), kills a zombie listener precisely
+(Get-NetTCPConnection, NOT findstr — it once matched 7 unrelated pids), fallback-
+launches :9119 with HERMES_HOME+token, starts :8000 if down, verifies mount.
+NEVER kill a healthy :9119 — it hosts the chat gateway (killing it killed chat).
+USER FLOW: start Hermes -> double-click start_lars_stack.cmd (or
+cmd /c "%LOCALAPPDATA%\hermes\desktop-plugins\lars\start_lars_stack.cmd") -> wait
+for OK lines -> test voice. Browser URL: http://127.0.0.1:9119 (not localhost).
+
 **VERIFY (in order):** `tasklist | grep -ic cscript` (=1) →
 `netstat -ano | grep -E ':(9119|8000)\s.*LISTEN'` (=2 lines) →
 `tail -5 voice/lars_stack.log` (ok lines every ~15 s).
