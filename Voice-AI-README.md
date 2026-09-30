@@ -3,6 +3,16 @@
 **Branch:** machine-2 · **Status:** agreed design, supersedes rev. 1
 **Build doc:** Hermes Local Voice Core — Windows 11, CPU-only, plugin-page voice for the Div 7 orb.
 
+> **STATUS 2026-09-30 (machine-2, Dave-verified live):**
+> WORKING: push-button mic turn + typed chat → STT → Lars session → per-sentence
+> pocket-tts → PCM (and bridge → real lars session with attach-per-turn).
+> NOT WORKING (next edits, in order): (1) streaming voice (design committed in
+> `specs/voice-streaming-design.md`; server mostly ready, page-side pending);
+> (2) barge-in; (3) "Hey Lars" trigger; (4) "Hermes" button on the voice panel does not
+> navigate to the Lars session in core Sessions and back. Stack startup adopted the
+> machine-1 model: Startup VBS for :9119 (specs/Hermes_Dashboard.vbs) + user env
+> token; :8000 manual (PS line in start_voice-README.txt).
+>
 > **NEXT BIG FIX (designed 2026-09-28 ~22:30, NOT yet built): full streaming voice.**
 > Design committed: `specs/voice-streaming-design.md` — mic ON = continuous PCM to :8000
 > (page becomes a dumb mic), Fred-AI 2.0s-silence server VAD turn-taking (auto-respond,

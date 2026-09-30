@@ -1,5 +1,8 @@
 __pycache__/
 
+# Zed editor local config (not part of the Hermes plugin)
+.zed/
+
 voice/.venv/
 voice/models/
 voice/voice_server.log

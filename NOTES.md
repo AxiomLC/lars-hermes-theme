@@ -1,10 +1,43 @@
 # NOTES — Lars working notes (informal, ours)
 
-Informal companion to README. Not user-facing. Everything decided/stated about structure,
+Informal companion to README. Not user-facing. Everything decided/STATED about structure,
 references, styling, and what we're stealing from whom. Update this instead of the README
 when a decision changes.
 
 ---
+
+## HANDOFF — 2026-09-30 (machine-2, live-tested by Dave)
+
+**WORKS (verified this session):**
+- Full voice chain mic → :8000 → STT → Lars session → per-sentence pocket-tts → PCM.
+  Push-button / typed chat both work (Dave-verified).
+- Stack startup (machine-1 model adopted): Startup-folder VBS `Hermes_Dashboard.vbs`
+  (specs/, copy in Startup) launches :9119 dashboard with HERMES_HOME + token at logon.
+  User env var `HERMES_DASHBOARD_SESSION_TOKEN=lars-voice-bridge-2026` also set via
+  setx. :8000 voice started MANUALLY (long PS Start-Process line in
+  `start_voice-README.txt`). Deliberately backtracked from .cmd/adopts/watcher work —
+  simpler, proven elsewhere.
+- Caveat observed: :9119 dashboard has recurring multi-minute `event loop stalled`
+  (GIL pressure) while Docker Desktop/WSL runs — all WS through it (incl. chat gateway
+  socket) fail and reconnect during stalls. Voice session itself unaffected usually.
+
+**NEXT EDITS (all NOT working, user-set priority):**
+1. Streaming voice — design ready (`specs/voice-streaming-design.md`), server-side mostly
+   done; page-side changes pending. Currently only push-button/typed turns work.
+2. Barge-in — not working.
+3. "Hey Lars" wake trigger — not wired to what works.
+4. Hermes button on voice panel does NOT navigate to the Lars session in the desktop
+   app (core Sessions) and back. Needs plugin page ⇄ core Sessions round trip.
+
+**ENV/infra notes:**
+- voice_server.py must run with WorkDir = voice/ (its imports resolve that way) — bare
+  `start "" python.exe ...` detach fails silently; use the PowerShell Start-Process in
+  start_voice-README.txt.
+- :8000 still manual-start; do NOT kill a healthy :9119; gateway+9120 legacy optional
+  (specs/Hermes_Gateway.vbs untouched).
+
+---
+
 
 ## NEXT BIG FIX — FULL STREAMING VOICE (designed, not yet built) — 2026-09-28 ~22:30
 
