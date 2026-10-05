@@ -1,10 +1,9 @@
 # stt_local.py — tiny local STT endpoint for the Lars voice module.
 # Single job: accept a WAV upload, transcribe it with faster-whisper (CPU,
-# model 'base' — see hermes-pocket-build.md §"STT fallback"), return JSON text.
+# model 'base'), return JSON text.
 # Flask dev server (no dependency on the gateway). Optional bearer token via
-# LARS_VOICE_TOKEN, same as voice2 server.
-#
-# Self-pruning log via the same keep-tail-half policy as voice2/server.js.
+# LARS_VOICE_TOKEN. Voice-loop diagnostics go to Hermes' voice-events.log via
+# the gateway-mounted plugin_api (/voice-log), NOT here.
 #
 # Tweaks (env):
 #   STT_MODEL   = faster-whisper model name (default: base)   # base <- tiny/small swappable
@@ -45,7 +44,7 @@ def get_model():
         _model = WhisperModel(_MODEL_NAME, device=_DEVICE, compute_type=_COMPUTE)
     return _model
 
-# ---- logging: self-pruning, same policy as voice2/server.js ----
+# ---- logging: self-pruning append; when a file passes the cap, keep the tail ----
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "stt-local.log")
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 MAX_LOG_BYTES = 300_000

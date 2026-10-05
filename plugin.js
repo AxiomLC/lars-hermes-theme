@@ -24,10 +24,11 @@
  * placeholder; swapping in a real image needs either an HTTPS url, a data:
  * URI, or moving the plugin to a bundled/unified package.
  *
- * NOTE (utilities rail removed 2026-09-24): the UtilitiesRail + plugin_api.py
- * backend were stripped from this build pending the revised family-wide
- * resource monitor (see Utility-Monitor-README.md). Voice/mic (JarvisMic)
- * kept as graphic placeholder per plan.
+ * NOTE (utilities rail removed 2026-09-24): the UtilitiesRail was stripped from
+ * this build pending the resource monitor (see Utility-Monitor.md). The
+ * gateway-mounted plugin_api.py backend REMAINS (plugins/lars/dashboard/) —
+ * used for titlebar /stats and /voice-log.
+ * Voice/mic (JarvisMic) kept as graphic placeholder per plan.
  */
 
 import { atom, host, icons, Contribute, TITLEBAR_AREAS, PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, useQuery, useValue } from '@hermes/plugin-sdk'

@@ -141,9 +141,10 @@ Location `%LOCALAPPDATA%\hermes\profiles\lars2\`. Current (verified working):
 Spec (pocket build doc §7): a gateway-side `lars_hud` tool the lars2 agent can call
 to push HUD events (weather, tasks, tickers) into the floating JarvisMic surface:
 
-1. `voice2/server.js` `/hud` POST (token+loopback, already stubbed) collects events.
-2. Add SSE channel `/hud/stream` → the plugin subscribes at mount.
-3. lars2 profile gives the agent a tiny skill/`lars_hud`-tool that POSTs to :1122.
+1. Gateway-side: the plugin plugin backend collects HUD POSTs (add a stub route in
+   `plugins/lars/dashboard/plugin_api.py`, same door as `/voice-log`).
+2. Add SSE/WebSocket channel (`ctx.socket('/hud-events')` is the sanctioned live twin) → the plugin subscribes at mount.
+3. lars2 profile gives the agent a tiny skill/`lars_hud`-tool that POSTs to that route.
 4. HUD boxes render inside JarvisMic panel per potential paths in the expanded
    mic UI. Keep prompt/tools minimal so the voice loop stays fast.
 5. Acceptance: HUD event from prompt → visible under mic within 1 s, no interference
