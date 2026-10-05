@@ -114,7 +114,7 @@ async def stats():
     import platform
     import time
 
-    out = {
+    out: dict[str, object] = {
         "ok": True,
         "hostname": platform.node() or "?",
         "os": f"{platform.system()} {platform.release()}",
