@@ -43,7 +43,7 @@ session as typed turns (voice ⇄ typed continuity).
 | STT | `voice2/stt_local.py` — faster-whisper `base`, CPU, Flask, `:8107` | `voice2/` |
 | TTS | Pocket TTS (`uvx pocket-tts serve`), voice `alba`, `:8000` | external pip tool |
 | Transport | Native gateway RPC (`prompt.submit`/`host.onEvent`) — **no API server in the voice loop** | Hermes |
-| Diag/TLS helper | `voice2/server.js`, `:1122` (diag mirror + optional SSE bridge) | `voice2/` |
+| Diag log | gateway-mounted `plugin_api.py` `POST /voice-log` → `hermes\plugins\lars\voice-events.log` (last 100 entries, agents-readable) | `plugins/lars/dashboard/` |
 
 ## Install
 
@@ -72,24 +72,24 @@ skills list (see `techREADME.md` §lars2 profile).
 1. **Gateway** — start Hermes desktop (it spawns the multiplex gateway that serves
    every profile, incl. `lars2`). CLI check: `hermes -p default gateway status`.
 2. **TTS** — `uvx pocket-tts serve` (keep detached).
-3. **STT + helper** — `cd voice2 && start.bat` (STT detached on `:8107`, server on `:1122`).
+3. **STT** — `cd voice2 && start.bat` (STT detached on `:8107`).
 4. **Plugin** — click **Lars** in the sidebar; mic button arms voice.
 
 Port map: `:9119` dashboard · `:8642` API server (external automation; not the voice
-loop) · `:5678` n8n · `:5432` PostgreSQL · `:1122` voice2 · `:8107` STT · `:8000` TTS.
+loop) · `:5678` n8n · `:5432` PostgreSQL · `:8107` STT · `:8000` TTS.
 
 ## Repo layout
 
 ```
 lars-hermes-theme/
 ├── plugin.js                # the desktop plugin — pages, JarvisMic, whole voice engine
-├── plugins/lars/            # browser-dashboard half (legacy) + plugin_api.py stats backend
+├── plugins/lars/            # browser-dashboard half (legacy) + plugin_api.py backend
+│                            #   (/stats chips + /voice-log dynamic error log)
 ├── specs/Hermes_Gateway.vbs # boot helper (gateway + stats)
 ├── themes/                  # desktop themes (hinokami-night, lars-yakuza)
 └── voice2/                  # Beta 2.0 voice module — see voice2/README.md
-    ├── server.js  stt_local.py  start.bat  .env
-    ├── public/              # standalone tester page for the voice loop
-    └── logs/                # self-pruning runtime logs
+    ├── stt_local.py  start.bat  .env
+    └── logs/                # runtime logs (gitignored)
 ```
 
 ## Troubleshooting (quick)

@@ -1,16 +1,14 @@
 {
   "name": "lars-voice2",
-  "version": "0.1.0",
-  "description": "Lars 2.0 voice module (Hermes desktop plugin dir): Web Speech STT, Hermes lars2 profile brain (cerebras gpt-oss-120b) or Cerebras direct, Pocket TTS streaming with barge-in",
+  "version": "0.2.0",
+  "description": "Lars 2.0 voice backend helpers: stt_local.py (faster-whisper STT endpoint on :8107). The voice engine lives in ../plugin.js; diagnostics go to the gateway-mounted plugin_api (POST /voice-log).",
   "private": true,
   "type": "module",
-  "main": "server.js",
+  "main": "stt_local.py",
   "scripts": {
-    "start": "node --env-file=.env server.js",
-    "dev": "node --watch --env-file=.env server.js"
+    "stt": "python stt_local.py"
   },
   "engines": {
     "node": ">=20.6"
-  },
-  "dependencies": {}
+  }
 }

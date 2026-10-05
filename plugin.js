@@ -99,16 +99,15 @@ const JV = {
 const PROFILE = 'lars2'
 const TTS_URL = 'http://127.0.0.1:8000/tts'
 const TTS_VOICE = 'alba'
-const DIAG_URL = 'http://127.0.0.1:1122/api/diag'
-const DIAG_TOKEN = 'beta-lars-voice-1'
 // Fire-and-forget diagnostic mirror — everything the transcript sees also lands
-// in voice2/logs/lars-diag.log (self-pruning, agent-readable via GET /api/diag).
+// in Hermes' own plugins/lars/voice-events.log via the gateway-mounted
+// plugin_api backend (POST /voice-log, capped at the last 100 entries).
+// Readable by Hermes agents (plain file) or: GET /api/plugins/lars/voice-log.
 function diag(src, msg) {
   try {
-    fetch(DIAG_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${DIAG_TOKEN}` },
-      body: JSON.stringify({ src, msg: String(msg).slice(0, 500) })
+    if (!pluginCtx || !pluginCtx.rest) return
+    pluginCtx.rest('/voice-log', {
+      method: 'POST', body: { src, level: /\.err$|^err$/.test(src) ? 'error' : 'info', msg: String(msg).slice(0, 500) }
     }).catch(() => {})
   } catch (e) {}
 }
@@ -123,7 +122,7 @@ const CFG = {
   FIRST_SENTENCE_MIN: 8, SENTENCE_MIN: 24, FIRST_CLAUSE_MIN: 40,
   // ---- STT fallback tuning (voice2/stt_local.py, faster-whisper 'base') ----
   STT_URL: 'http://127.0.0.1:8107/transcribe',
-  STT_TOKEN: DIAG_TOKEN,
+  STT_TOKEN: 'beta-lars-voice-1',   // = LARS_VOICE_TOKEN in stt_local's env
   STT_ON_LEVEL: 0.030,     // mic peak amplitude above this = user speaking (mic sensitivity; raise if false-positives)
   SILENCE_MS: 2000,        // ← user-speech end timeout: silence this long commits the utterance (was 2000; tweak here)
   STT_MIN_AUDIO_MS: 400,   // shorter than this is noise, discard

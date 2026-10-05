@@ -16,6 +16,17 @@ import io
 import os
 import wave
 
+# load sibling .env (start.bat launches detached, so shell env is empty)
+try:
+    _envpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    for _line in open(_envpath, encoding="utf-8"):
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip())
+except Exception:
+    pass
+
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)

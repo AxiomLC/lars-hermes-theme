@@ -79,7 +79,12 @@ Location `%LOCALAPPDATA%\hermes\profiles\lars2\`. Current (verified working):
 
 ## 4. plugin.js function map (voice + shell, ~1135 lines)
 
-- `diag(src,msg)` — fire-and-forget POST to voice2 `/api/diag` (mirror of transcript).
+- `diag(src,msg)` — fire-and-forget POST to the gateway-mounted plugin backend
+  `POST /voice-log` (via `pluginCtx.rest`) → one JSON line appended to
+  `...\hermes\plugins\lars\voice-events.log`, hard-capped at the last 100
+  entries. Readable by Hermes agents as a plain file, or via
+  `GET /api/plugins/lars/voice-log` (loopback, `X-Hermes-Session-Token`).
+  (Replaced the old `:1122 /api/diag` mirror; that helper server is deleted.)
 - `CFG` — all tuning knobs (see voice2/README table). Edit here, reload plugin.
 - `makeChunker(pushSentence)` — streaming text → sentence/first-clause cuts
   (first sentence ≥8 chars or comma ≥40, then sentences ≥24 chars).
@@ -111,10 +116,25 @@ Location `%LOCALAPPDATA%\hermes\profiles\lars2\`. Current (verified working):
   `lars-diag.log`, TTS buffers dropped (`L.gen++`), `session.interrupt` fired.
 - STT empty result: read `voice2/logs/stt-local.log`; `len=0` means capture was
   noise (raise `STT_ON_LEVEL`) — whisper VAD is off by design, our energy VAD rules.
-- Diag one-stop: `curl -H "Authorization: Bearer beta-lars-voice-1" http://127.0.0.1:1122/api/diag`.
-  Log cap 300 KB per file, self-pruning to the tail half. `stt-local.log` records
-  ms/audio-seconds/text per request. `voice2-frames.log` holds raw upstream frames.
+- Diag one-stop: `curl -H "X-Hermes-Session-Token: <token>" http://127.0.0.1:9119/api/plugins/lars/voice-log`
+  — or just read `~\AppData\Local\hermes\plugins\lars\voice-events.log` directly
+  (last 100 JSON lines `{t, src, level, msg}`; the cap IS the pruning).
+- Legacy per-request STT log: `voice2/logs/stt-local.log` (ms / audio-seconds /
+  text per request, 300 KB tail-pruned). `voice2-frames.log` was deleted with
+  the `:1122` helper — raw frames now visible in Hermes `hermes logs --since 5m
+  --include-data` if ever needed.
 - Prompt size check: `hermes -p lars2 <prompt>` with `--usage-file` to see input tokens.
+
+### Live-verified mounting notes (2026-10-05)
+
+- Plugin backend routes are imported **once at dashboard startup** — after
+  editing `plugins/lars/dashboard/plugin_api.py`, restart the dashboard
+  (`hermes dashboard --stop` + relaunch) or the new routes 404.
+- Route door tested end-to-end: POST `{src,msg}` → `{ok:true,n}`; GET returns
+  `{file, entries}`.
+- Dashboard session token lives in the user env
+  `HERMES_DASHBOARD_SESSION_TOKEN` (somewhat stale copies possible in detached
+  processes).
 
 ## 6. Future build: HUD (lars_hud tool)
 

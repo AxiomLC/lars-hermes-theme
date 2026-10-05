@@ -11,6 +11,54 @@ from fastapi import APIRouter, Request
 
 router = APIRouter()
 
+# ---- voice log (dynamic, self-pruning, last ~100 entries) ----
+# The plugin's voice engine POSTs one JSON line per status/error here via
+# ctx.rest('/voice-log'); anything (agent or human) reads the tail via GET.
+# Kept in Hermes home so the gateway/agents reach it by file path too.
+import json as _json
+import os
+import time as _time
+
+VOICE_LOG_MAX = 100                      # keep the last N entries
+VOICE_LOG_PATH = os.path.expanduser(r"~\AppData\Local\hermes\plugins\lars\voice-events.log")
+
+def _read_voice_log():
+    try:
+        with open(VOICE_LOG_PATH, encoding="utf-8") as f:
+            return [ln for ln in f.read().splitlines() if ln.strip()]
+    except FileNotFoundError:
+        return []
+    except Exception:
+        return []
+
+@router.post("/voice-log")
+async def voice_log_post(request: Request):
+    try:
+        payload = await request.json()
+        entry = {
+            "t": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "src": str(payload.get("src") or "page")[:40],
+            "level": str(payload.get("level") or "info")[:12],
+            "msg": str(payload.get("msg") or "")[:500],
+        }
+    except Exception as exc:
+        return {"ok": False, "error": f"bad payload: {exc}"[:200]}
+    try:
+        os.makedirs(os.path.dirname(VOICE_LOG_PATH), exist_ok=True)
+        lines = _read_voice_log()
+        lines.append(_json.dumps(entry, ensure_ascii=False))
+        if len(lines) > VOICE_LOG_MAX:
+            lines = lines[-VOICE_LOG_MAX:]
+        with open(VOICE_LOG_PATH, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        return {"ok": True, "n": len(lines)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:200]}
+
+@router.get("/voice-log")
+async def voice_log_get():
+    return {"ok": True, "file": VOICE_LOG_PATH, "entries": _read_voice_log()}
+
 # Prime cpu_percent() at import so first API call returns real data, not 0.0
 try:
     import psutil as _psutil
