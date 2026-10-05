@@ -86,156 +86,476 @@ const JV = {
   mono: '"JetBrains Mono",ui-monospace,Menlo,monospace'
 }
 
-// ── VoiceLink — WS to local voice service :8000 (Voice-AI-README §4) ─────────
-// State map (service → stateAtom): 'listening'→'hot', partial user text→'user',
-// 'lars'→'lars', done→'hot'. Capture: AudioWorklet Int16 16k via Blob URL.
-// Playback: manual AudioBuffers chained back-to-back, refs kept for barge-in.
-const VOICE_WS = 'ws://127.0.0.1:8000/ws/voice?token=lars-voice-dev-token'
+// ── VoiceLink v2 — all-in-page voice engine (Pocket format) + native RPC brain ─
+// Ported from AxiomLC/lars-pocket-tts (proven semi-streaming):
+//   Web Speech STT + 2 s silence turn-taking + echo defence → sentence chunker →
+//   Pocket TTS :8001 (streamed WAV) → gapless Web Audio playback → barge-in/re-arm.
+// Brain: NATIVE desktop session — no API server, no helper server:
+//   host.request RPC (session.most_recent/resume/create, prompt.submit,
+//   session.interrupt, session.close) against profile 'lars2', deltas via the
+//   gateway event stream (message.delta/message.interim/message.complete).
+// Visuals unchanged — same interface as the old link: start/stop/startCapture/
+// typed/log/state ('deaf'|'hot'|'user'|'lars').
+const PROFILE = 'lars2'
+const TTS_URL = 'http://127.0.0.1:8000/tts'
+const TTS_VOICE = 'alba'
+const DIAG_URL = 'http://127.0.0.1:1122/api/diag'
+const DIAG_TOKEN = 'beta-lars-voice-1'
+// Fire-and-forget diagnostic mirror — everything the transcript sees also lands
+// in voice2/logs/lars-diag.log (self-pruning, agent-readable via GET /api/diag).
+function diag(src, msg) {
+  try {
+    fetch(DIAG_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${DIAG_TOKEN}` },
+      body: JSON.stringify({ src, msg: String(msg).slice(0, 500) })
+    }).catch(() => {})
+  } catch (e) {}
+}
+
+const CFG = {
+  SILENCE_MS: 2000,        // silence before an utterance is sent
+  STT_LANG: 'en-US',
+  BARGE_GRACE_MS: 500,     // ignore mic speech right after our audio starts
+  BARGE_MIN_NOVEL: 2,      // heard words not in our own reply text → real user
+  BARGE_WORDS: new Set(['stop', 'wait', 'cancel', 'pause', 'hold', 'no', 'quiet', 'enough']),
+  TAIL_MS: 1800,           // echo-tail filter after our playback ends
+  FIRST_SENTENCE_MIN: 8, SENTENCE_MIN: 24, FIRST_CLAUSE_MIN: 40,
+  // ---- STT fallback tuning (voice2/stt_local.py, faster-whisper 'base') ----
+  STT_URL: 'http://127.0.0.1:8107/transcribe',
+  STT_TOKEN: DIAG_TOKEN,
+  STT_ON_LEVEL: 0.030,     // mic peak amplitude above this = user speaking (mic sensitivity; raise if false-positives)
+  SILENCE_MS: 2000,        // ← user-speech end timeout: silence this long commits the utterance (was 2000; tweak here)
+  STT_MIN_AUDIO_MS: 400,   // shorter than this is noise, discard
+  BARGE_RMS: 0.060,        // while Lars speaks: peak above this for N polls = barge-in (echo risk knob; keep > STT_ON_LEVEL)
+  BARGE_POLLS: 4,          // consecutive ~21 ms polls above BARGE_RMS required
+}
+
+const SpeechRecognitionCtor = null // Web Speech removed: Google endpoint unreachable from Electron renderer — STT is now local whisper via :8107
+
+function setupMicTrack() {
+  return navigator.mediaDevices.getUserMedia({ audio: {
+    channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true
+  }})
+}
+
+function makeChunker(pushSentence) {
+  let buffer = '', isFirst = true
+  function findCut() {
+    if (isFirst) {
+      const m = buffer.slice(0, 64).match(/[.!?](\s|$)/)
+      if (m && buffer.slice(0, m.index + 1).trim().length >= CFG.FIRST_SENTENCE_MIN)
+        return m.index + 1
+      const comma = buffer.indexOf(',')
+      if (comma >= 0 && comma + 1 >= CFG.FIRST_CLAUSE_MIN) return comma + 1
+      return null
+    }
+    const m = buffer.slice(0, 160).match(/[.!?](\s|$)/g)
+    if (m) {
+      const end = buffer.indexOf(m[m.length - 1]) + 1
+      if (buffer.slice(0, end).trim().length >= CFG.SENTENCE_MIN) return end
+    }
+    return null
+  }
+  return {
+    push(t) {
+      buffer += t
+      let cut
+      while ((cut = findCut())) {
+        const sentence = buffer.slice(0, cut).trim()
+        buffer = buffer.slice(cut)
+        isFirst = false
+        if (sentence) pushSentence(sentence)
+      }
+    },
+    flush() { if (buffer.trim()) { pushSentence(buffer.trim()); buffer = '' } }
+  }
+}
+
+function cleanForSpeech(t) {
+  return t
+    .replace(/\[[^\]]*\]|\([^)]*\)|\{[^}]*\}/g, ' ')   // brackets/parens/braces
+    .replace(/https?:\/\/\S+/g, ' ')                    // URLs
+    .replace(/[*_`#>|]+/g, ' ')                          // markdown
+    .replace(/\s+/g, ' ').trim()
+}
 
 function createVoiceLink(stateAtom, onText) {
-  const L = { ctx: null, node: null, stream: null, open: false, buf: [],
-              speechAt: null, submitting: false }
-  const workletCode =
-    'class PCMCap extends AudioWorkletProcessor {' +
-    '  process(inputs){' +
-    '    const ch = inputs[0][0]; if(!ch) return true;' +
-    '    const i16 = new Int16Array(ch.length);' +
-    '    for(let i=0;i<ch.length;i++) i16[i] = Math.max(-32768, Math.min(32767, ch[i]*32767));' +
-    '    this.port.postMessage(i16.buffer, [i16.buffer]);' +
-    '    return true } }' +
-    'registerProcessor("lars-pcm", PCMCap)'
-  L.workletURL = URL.createObjectURL(new Blob([workletCode], { type: 'application/javascript' }))
+  const L = { ctxM: null, track: null, rec: null, listening: false,
+              buf: [], silenceTimer: null, transcript: [], speakingStart: 0,
+              lastSpeechEnd: 0, log: [], sessionId: null, liveId: null,
+              gen: 0, llmActive: false, ctxP: null, srcs: [], nextAt: 0 }
   L.setState = s => stateAtom.set(s)
+  const bump = () => { try { onVersionBump() } catch (e) { /* wired at register */ } }
+  let onVersionBump = () => {}
+  L._setBump = f => { onVersionBump = f }
 
-  // WS to the voice service (:8000) — carries the typed transcript to the real
-  // Lars session and brings back streamed Pocket-TTS audio + reply text.
-  L.sendJSON = obj => {
-    const s = JSON.stringify(obj)
-    if (L.ws && L.ws.readyState === 1) L.ws.send(s)
-    else if (L.ws && L.ws.readyState === 0) { L.q = L.q || []; L.q.push(s) }
+  const say = (role, text) => {
+    if (!text) return
+    L.log.push({ role, text, t: Date.now() })
+    if (L.log.length > 50) L.log.shift()
+    onVersionBump()
+    diag('voice.' + role, text)
   }
-  L.onFrame = ev => {
-    if (ev.data instanceof ArrayBuffer) { L.playChunk(ev.data); return }
-    let d; try { d = JSON.parse(ev.data) } catch (e) { return }
-    if (d.event === 'audio_format') L.rate = d.rate
-    else if (d.event === 'text') {
-      if (d.role === 'lars') { L.setState('lars'); if (onText) onText('lars', d.text || '') }
-      else if (d.role === 'user' && onText) onText('user', d.text || '')
-    } else if (d.event === 'state') {
-      if (d.state === 'off') { L.setState('deaf') }        // idle timeout — mic icon re-arms
-      else if (d.state !== 'processing' || !L.open) L.setState(d.state === 'listening' ? 'hot' : d.state)
-    } else if (d.event === 'interrupted') { L.bargeIn() }
-    else if (d.event === 'done') { if (!L.open) L.setState('hot') }
-    else if (d.event === 'error') { if (onText) onText('err', d.msg || 'voice error') }
-  }
-  L.ensureWs = () => {
-    if (L.ws && (L.ws.readyState === 0 || L.ws.readyState === 1)) return
-    try {
-      L.ws = new WebSocket(VOICE_WS)
-      L.ws.binaryType = 'arraybuffer'
-      L.ws.onmessage = ev => { try { L.onFrame(ev) } catch (e) {} }
-      L.ws.onopen = () => { (L.q || []).forEach(s => { try { L.ws.send(s) } catch (e) {} }); L.q = [] }
-      L.ws.onclose = () => { if (onText) onText('err', 'voice service :8000 not reachable (TTS off)') }
-    } catch (e) { if (onText) onText('err', 'ws: ' + e.message) }
-  }
-  L.rate = 24000
-  L.playChunk = ab => {
-    try {
-      if (!L.ctxP) L.ctxP = new AudioContext({ sampleRate: L.rate })
-      if (L.ctxP.state === 'suspended') L.ctxP.resume()
-      const i16 = new Int16Array(ab)
-      if (!i16.length) return
-      const buf = L.ctxP.createBuffer(1, i16.length, L.rate)
-      const ch = buf.getChannelData(0)
-      for (let i = 0; i < i16.length; i++) ch[i] = i16[i] / 32768
-      const src = L.ctxP.createBufferSource()
-      src.buffer = buf
-      src.connect(L.ctxP.destination)
-      const at = Math.max(L.ctxP.currentTime, L.nextAt || 0)
-      src.start(at)
-      L.nextAt = at + buf.duration
-      L.srcs = L.srcs || []
-      L.srcs.push(src)
-      src.onended = () => { L.srcs = L.srcs.filter(s => s !== src); if (!L.srcs.length) L.nextAt = 0 }
-    } catch (e) { console.log('[lars-voice] playChunk error:', e.message) }
-  }
+  L.addLog = say
 
-  // Press once = hot mic ON: every Int16 frame streams to :8000 (dumb mic —
-  // server VAD turn-taking, 2 s silence -> Lars responds, mic keeps streaming;
-  // 10 s idle -> server sends 'off' and the mic icon re-arms). No page VAD,
-  // no /transcribe path — the server does STT + bridge + TTS.
-  L.start = () => {
-    if (L.open) return
-    console.log('[lars-voice] start()')
-    L.open = true
-    L.setState('hot')
-    L.ensureWs()
-    L.sendJSON({ event: 'listen' })
-    L.startCapture()   // async; PCM flows as soon as the worklet is up
-  }
-
-  L.stop = () => {
-    L.stopCapture()
-    L.open = false
-    L.setState('deaf')
-    L.sendJSON({ event: 'stop' })   // server drops the turn, back to 'off'
-  }
-
-  // Barge-in: Lars was interrupted — kill all scheduled/playing TTS chunks now.
-  // Must zero L.nextAt AND stop srcs (future-scheduled chunks would keep talking).
-  L.bargeIn = () => {
-    console.log('[lars-voice] barge-in: flushing', (L.srcs || []).length, 'chunk(s)')
-    ;(L.srcs || []).forEach(s => { try { s.stop() } catch (e) {} })
+  // ---- audio playback (Pocket Speaker, compact) ----
+  L.cancelPlayback = () => {
+    L.gen++
+    L.srcs.forEach(s => { try { s.stop() } catch (e) {} })
     L.srcs = []
     L.nextAt = 0
-    L.setState('hot')
   }
+  const getOutCtx = () => {
+    if (!L.ctxP) L.ctxP = new AudioContext()
+    if (L.ctxP.state === 'suspended') L.ctxP.resume()
+    return L.ctxP
+  }
+  const schedule = (ctx, samples, rate, myGen) => {
+    const buf = ctx.createBuffer(1, samples.length, rate)
+    buf.getChannelData(0).set(samples)
+    const src = ctx.createBufferSource()
+    src.buffer = buf
+    src.connect(ctx.destination)
+    const startAt = Math.max(ctx.currentTime + 0.03, L.nextAt)
+    src.start(startAt)
+    L.nextAt = startAt + buf.duration
+    L.srcs.push(src)
+    src.onended = () => {
+      L.srcs = L.srcs.filter(x => x !== src)
+      if (!L.srcs.length && myGen === L.gen) {
+        L.lastSpeechEnd = performance.now()
+        L.setState('hot')
+        say('sys', 'lars done speaking')
+        L.startListening().catch(() => {})
+      }
+    }
+  }
+  async function speakOne(text, myGen) {
+    const form = new FormData()
+    form.append('text', text)
+    if (TTS_VOICE) form.append('voice_url', TTS_VOICE)
+    const resp = await fetch(TTS_URL, { method: 'POST', body: form })
+    if (!resp.ok) throw new Error('tts ' + resp.status)
+    const reader = resp.body.getReader()
+    const dec = new TextDecoder()
+    let pending = new Uint8Array(0), headerDone = false, rate = 24000, header = new Uint8Array(0)
+    const out = getOutCtx()
+    for (;;) {
+      if (myGen !== L.gen) { try { await reader.cancel() } catch (e) {} return }
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!headerDone) {
+        header = new Uint8Array([...header, ...value])
+        const h = header.length
+        if (h >= 44 && header[0] === 0x52 && header[1] === 0x49) { // 'RIFF'
+          rate = header[24] | (header[25] << 8) | (header[26] << 16) | (header[27] << 24)
+          headerDone = true
+          pending = header.subarray(h - (h % 2) >= 44 ? h % 2 : 0)
+          pending = header.subarray(44)
+        }
+        if (!headerDone) continue
+      } else pending = new Uint8Array([...pending, ...value])
+      const usable = pending.length - (pending.length % 2)
+      if (usable > 4800) {
+        const i16 = new Int16Array(pending.buffer.slice(0, usable))
+        const f32 = new Float32Array(i16.length)
+        for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768
+        schedule(out, f32, rate, myGen)
+        pending = pending.slice(usable)
+      }
+    }
+  }
+  // speak sentences sequentially, gapless
+  const speakQueue = []
+  let draining = false
+  async function drain() {
+    if (draining) return
+    draining = true
+    while (speakQueue.length) {
+      const text = speakQueue.shift()
+      const myGen = L.gen
+      try { await speakOne(text, myGen) } catch (e) { say('err', 'tts: ' + e.message) }
+      if (myGen !== L.gen) { speakQueue.length = 0; break }
+    }
+    draining = false
+  }
+  L.speak = text => { speakQueue.push(text); drain() }
 
-  L.startCapture = async () => {
-    if (L.stream) return
-    console.log('[lars-voice] startCapture()')
+  // ---- brain: native desktop session RPC (profile lars2) ----
+  async function ensureSession() {
+    // adopt the desktop's focused lars2 session when one is open (voice ⇄ typed continuity)
     try {
-      L.stream = await navigator.mediaDevices.getUserMedia({ audio: {
-        channelCount: 1, echoCancellation: true,
-        noiseSuppression: true, autoGainControl: true } })
-      // Electron ignores the 16k constraint (44.1/48k) — declare the REAL rate
-      // to the server, which resamples. No forcing the context to 16k either:
-      // a mismatched declaration is what broke STT before.
-      L.ctx = new AudioContext()
-      await L.ctx.audioWorklet.addModule(L.workletURL)
-      L.node = new AudioWorkletNode(L.ctx, 'lars-pcm')
-      L.node.port.onmessage = L.onPcm
-      const src = L.ctx.createMediaStreamSource(L.stream)
-      src.connect(L.node)  // node is a sink — do NOT connect to destination
-      const realRate = L.ctx.sampleRate
-      console.log('[lars-voice] capture RUNNING @', realRate, 'Hz')
-      L.sendJSON({ event: 'audio_format', rate: realRate })
+      const fp = host.state.focusedSessionProfile ? host.state.focusedSessionProfile.get() : ''
+      const fsid = host.state.focusedStoredSessionId ? host.state.focusedStoredSessionId.get() : null
+      if (fp === PROFILE && fsid) { L.sessionId = fsid; diag('session', 'adopted focused ' + fsid) }
+    } catch (e) {}
+    if (L.sessionId) {
+      try {
+        const r = await host.request('session.resume', { session_id: L.sessionId, profile: PROFILE, lazy: true })
+        L.liveId = r.session_id
+        return L.liveId
+      } catch (e) { L.sessionId = null }   // stale stored id → recreate
+    }
+    try {
+      const mr = await host.request('session.most_recent', { profile: PROFILE })
+      const stored = mr && (mr.stored_session_id || mr.session_id)
+      if (stored) {
+        const r = await host.request('session.resume', { session_id: stored, profile: PROFILE, lazy: true })
+        L.sessionId = stored; L.liveId = r.session_id
+        return L.liveId
+      }
+    } catch (e) {}
+    const c = await host.request('session.create', { profile: PROFILE, title: 'Voice — ' + new Date().toISOString().slice(0, 16), source: 'voice' })
+    L.sessionId = c.stored_session_id || c.session_id
+    L.liveId = c.session_id
+    return L.liveId
+  }
+
+  L.turnActive = false
+  async function submitTurn(userText) {
+    if (!userText.trim() || L.turnActive) return
+    L.cancelEverything()
+    const myGen = L.gen
+    L.turnActive = true
+    L.llmActive = true
+    say('user', userText)
+    L.setState('user')
+    // NOTE: mic/VAD stays live through the turn — it powers barge-in while
+    // Lars speaks. Capture is suppressed by the llmActive branch in poll().
+    const chunker = makeChunker(sentence => {
+      if (myGen !== L.gen) return
+      const clean = cleanForSpeech(sentence)
+      if (!clean) return
+      say('lars', clean)
+      if (!L.speakingStart) { L.speakingStart = performance.now(); L.setState('lars') }
+      L.speak(clean)
+    })
+    let full = '', firstDelta = false
+    let placementDone = false
+    try {
+      const sid = await ensureSession()
+      const res = await host.request('prompt.submit', { session_id: sid, profile: PROFILE, text: userText, surface: 'voice' })
+      diag('brain', 'prompt.submit -> ' + JSON.stringify(res).slice(0, 200))
+      // stream deltas until run finishes; host.onEvent listeners below feed handleEvent()
+      L.pendingTurn = { chunker, myGen }
+    } catch (e) {
+      say('err', 'brain: ' + (e.message || e))
       L.setState('hot')
-    } catch (e) { console.log('[lars-voice] capture error:', e.message); if (onText) onText('err', 'mic: ' + e.message); L.setState('deaf') }
+      L.turnActive = false; L.llmActive = false
+      return
+    }
   }
 
-  // Dumb mic: every Int16 frame goes straight to :8000. Drop while CONNECTING
-  // (never queue — stale audio). Server owns VAD, STT, turn-taking.
-  L.onPcm = e => {
-    if (!L.open) return
-    if (!L.ws || L.ws.readyState !== 1) return
-    try { L.ws.send(e.data) } catch (err) {}
+  // gateway event handlers (registered via ctx.onEvent at plugin register)
+  L.handleGatewayEvent = ev => {
+    const sid = ev.session_id || ev.payload?.session_id || ''
+    if (L.liveId && sid && sid !== L.liveId) return   // not our session's turn
+    const payload = ev.payload || ev
+    const type = ev.type || ev.method || ''
+    if (type === 'message.delta' || type === 'message.interim') {
+      const t = (payload && (payload.text || payload.delta)) || ''
+      if (!t || !L.pendingTurn) return
+      if (payload.already_streamed && type === 'message.interim') return
+      const { chunker, myGen } = L.pendingTurn
+      if (myGen !== L.gen) return
+      firstDeltaSeen = true
+      fullBuf += t
+      chunker.push(t)
+      armFinishGuard()
+    } else if (type === 'message.complete') {
+      const full = (payload && payload.text) || ''
+      if (L.pendingTurn && full && !deltaGotEnough()) {
+        // deltas absent → speak the full reply as fallback
+        const { chunker, myGen } = L.pendingTurn
+        if (myGen === L.gen && fullBuf.trim().length < full.trim().length) { chunker.push(full.slice(fullBuf.length)); fullBuf = full }
+      }
+      finishTurn()
+    }
+  }
+  let fullBuf = '', firstDeltaSeen = false
+  const deltaGotEnough = () => fullBuf.trim().length > 0 && (peekRunDone || false)
+  let peekRunDone = false
+  function finishTurn() {
+    if (!L.pendingTurn) return
+    peekRunDone = true
+    const { chunker } = L.pendingTurn
+    chunker.flush()
+    L.pendingTurn = null
+    L.turnActive = false
+    L.llmActive = false
+    // attach-per-turn hygiene (old-module lesson): release the live lease so the
+    // desktop composer and this voice turn never fight over "chat open elsewhere".
+    if (L.liveId) host.request('session.close', { session_id: L.liveId, profile: PROFILE }).catch(() => {})
+    L.setState(L.srcs.length ? 'lars' : 'hot')
   }
 
-  // TYPE box -> same path as voice: the transcript goes to the voice service,
-  // which submits it to the real Lars session and speaks the reply (TTS).
-  L.typed = text => {
-    if (!text) return
-    if (onText) onText('user', text)
-    L.ensureWs()
-    L.sendJSON({ event: 'typed', text })
+  // fallback: if no message.complete arrives within N s of last delta, end turn
+  let finishGuardId = null
+  const armFinishGuard = () => {
+    if (finishGuardId) window.clearTimeout(finishGuardId)
+    finishGuardId = window.setTimeout(() => { if (L.pendingTurn && fullBuf.trim()) finishTurn() }, 5000)
   }
 
-  L.stopCapture = () => {
-    if (L.stream) { L.stream.getTracks().forEach(t => t.stop()); L.stream = null }
-    if (L.node) { try { L.node.disconnect() } catch (e) {} L.node = null }
-    if (L.ctx) { try { L.ctx.close() } catch (e) {} L.ctx = null }
+  L.cancelEverything = () => {
+    L.cancelPlayback()
+    L.pendingTurn = null
+    L.turnActive = false
+    L.llmActive = false
   }
+
+  // ---- STT: local faster-whisper fallback + VAD silence commit + barge-in ----
+  // Pipeline: mic stream → RMS VAD → capture Float32 PCM while user speaks →
+  // after CFG.SILENCE_MS of silence, resample to 16 kHz, encode WAV, POST to
+  // CFG.STT_URL (voice2/stt_local.py) → text → commitUtterance.
+  L.startListening = async () => {
+    if (L.listening) return
+    let track
+    try { track = await setupMicTrack() } catch (e) { say('err', 'mic: permission denied'); return }
+    L.track = track
+    try { L.ctxM = L.ctxM || new AudioContext(); if (L.ctxM.state === 'suspended') await L.ctxM.resume() } catch (e) {}
+    const ctxM = L.ctxM
+    const src = ctxM.createMediaStreamSource(track)
+    const an = ctxM.createAnalyser(); an.fftSize = 1024
+    src.connect(an)                    // analyse only — never to destination (no echo loop)
+    L.analyser = an
+    L.vadBuf = new Float32Array(an.fftSize)
+    L.roll = []; L.cap = []; L.capSpeech = false; L.silMs = 0; L.bargeRun = 0
+    L.listening = true
+    if (!L.llmActive) L.setState('hot')
+    const POLL_MS = (an.fftSize / ctxM.sampleRate) * 1000   // ~21 ms window per poll
+    const finalize = async () => {
+      const ch = L.cap; const sr = ctxM.sampleRate
+      L.cap = []; L.capSpeech = false; L.silMs = 0
+      const durMs = ch.length * POLL_MS
+      if (durMs < CFG.STT_MIN_AUDIO_MS) return            // too short = noise
+      const total = ch.reduce((n, b) => n + b.length, 0)
+      if (!total) return
+      try {
+        // resample 48 kHz → 16 kHz for whisper (OfflineAudioContext does it in one shot)
+        const samples = new Float32Array(total); let o = 0
+        for (const b of ch) { samples.set(b, o); o += b.length }
+        const big = ctxM.createBuffer(1, samples.length, sr)
+        big.getChannelData(0).set(samples)
+        const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(samples.length * 16000 / sr)), 16000)
+        const s2 = off.createBufferSource(); s2.buffer = big; s2.connect(off.destination); s2.start()
+        const small = await off.startRendering()
+        const pcm = small.getChannelData(0)
+        // encode 16-bit PCM WAV
+        const wav = new ArrayBuffer(44 + pcm.length * 2)
+        const v = new DataView(wav)
+        const str = (i, s) => { for (let i2 = 0; i2 < s.length; i2++) v.setUint8(i + i2, s.charCodeAt(i2)) }
+        str(0, 'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); str(8, 'WAVE'); str(12, 'fmt ')
+        v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true)
+        v.setUint32(24, 16000, true); v.setUint32(28, 16000 * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true)
+        str(36, 'data'); v.setUint32(40, pcm.length * 2, true)
+        for (let i = 0; i < pcm.length; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true)
+        const resp = await fetch(CFG.STT_URL, { method: 'POST', signal: myGenAbort(), headers: { Authorization: `Bearer ${CFG.STT_TOKEN}`, 'Content-Type': 'audio/wav' }, body: wav })
+        if (!resp.ok) throw new Error('stt http ' + resp.status)
+        const j = await resp.json()
+        const text = (j.text || '').trim()
+        if (text && !L.turnActive) submitTurn(text)
+        else if (text) L.bufferedText = text   // turn already live (race) — don't double-log
+        else say('sys', 'stt heard nothing (too quiet?)')
+      } catch (e) { say('err', 'stt: ' + (e.message || e)) }
+    }
+    const poll = () => {
+      if (!L.listening) return
+      an.getFloatTimeDomainData(L.vadBuf)
+      let peak = 0
+      for (let i = 0; i < L.vadBuf.length; i++) { const a = L.vadBuf[i] < 0 ? -L.vadBuf[i] : L.vadBuf[i]; if (a > peak) peak = a }
+      if (L.llmActive || L.srcs.length) {
+        // barge-in channel: sustained energetic speech while Lars is talking
+        L.roll = []
+        if (peak > CFG.BARGE_RMS) {
+          L.bargeRun++
+          if (L.bargeRun >= CFG.BARGE_POLLS && performance.now() - L.speakingStart > CFG.BARGE_GRACE_MS) { L.bargeRun = 0; L.bargeIn() }
+        } else L.bargeRun = 0
+      } else {
+        // hot-mic capture: ring buffer + utterance recording + SILENCE_MS commit
+        L.roll.push(new Float32Array(L.vadBuf)); if (L.roll.length > 14) L.roll.shift()
+        if (peak > CFG.STT_ON_LEVEL && !L.capSpeech) {
+          L.capSpeech = true; L.silMs = 0
+          L.cap = L.roll.map(b => new Float32Array(b))   // include pre-roll so word onsets survive
+          L.roll = []
+        }
+        if (L.capSpeech) {
+          L.cap.push(new Float32Array(L.vadBuf))
+          if (L.cap.length * POLL_MS > 20000) { finalize(); }        // safety cut at 20 s
+          else if (peak > CFG.STT_ON_LEVEL) L.silMs = 0
+          else {
+            L.silMs += POLL_MS
+            if (L.silMs >= CFG.SILENCE_MS) finalize()
+          }
+        }
+      }
+      L.vadTimer = window.setTimeout(poll, POLL_MS)
+    }
+    poll()
+  }
+  // helper used by finalize: abort stale STT posts when a new turn starts
+  const myGenAbort = () => {
+    try { const c = new AbortController(); L.sttAcs = L.sttAcs || []; L.sttAcs.push(c)
+          if (L.sttAcs.length > 4) L.sttAcs.shift(); return c.signal } catch (e) { return undefined }
+  }
+  L.stopListening = () => {
+    L.listening = false
+    if (L.vadTimer) { window.clearTimeout(L.vadTimer); L.vadTimer = null }
+    if (L.track) { L.track.getTracks().forEach(t => t.stop()); L.track = null }
+    if (L.ctxM) { try { L.ctxM.close() } catch (e) {} L.ctxM = null }
+    L.cap = []; L.capSpeech = false
+  }
+
+  function maybeBarge(heard) {
+    if (!L.llmActive || !heard) return false
+    const now = performance.now()
+    if (now - L.speakingStart < CFG.BARGE_GRACE_MS) return false
+    const spokenSet = new Set((L.spokenWords || []).slice(-60))
+    const heardWords = heard.toLowerCase().split(/\s+/).filter(Boolean)
+    const buttons = heardWords.some(w => CFG.BARGE_WORDS.has(w))
+    const novel = heardWords.filter(w => w.length > 2 && !spokenSet.has(w)).length
+    if (buttons || novel >= CFG.BARGE_MIN_NOVEL) {
+      L.spokenWords = heardWords
+      L.bargeIn()
+      return true
+    }
+    return false
+  }
+
+  // barge-in: flush TTS + interrupt the agent turn; keep listening
+  L.bargeIn = () => {
+    console.log('[lars-voice] barge-in')
+    diag('voice.sys', 'barge-in')
+    L.cancelPlayback()
+    if (L.liveId) host.request('session.interrupt', { session_id: L.liveId, profile: PROFILE }).catch(() => {})
+    L.pendingTurn = null; L.turnActive = false; L.llmActive = false
+    L.setState('hot')
+    if (!L.listening) L.startListening().catch(() => {})
+  }
+  L.spokenWords = []
+
+  function commitUtterance(text) {
+    if (!text || L.turnActive) return
+    submitTurn(text)
+  }
+
+  // ---- live cycle ----
+  L.start = () => {
+    if (L.open) return
+    L.open = true
+    L.setState('hot')
+    L.startListening().catch(() => {})
+  }
+  L.open = false
+  L.stop = () => {
+    L.open = false
+    L.cancelEverything()
+    L.stopListening()
+    L.setState('deaf')
+  }
+  L.startCapture = async () => { /* Web Speech owns the mic — retained for interface compat */ L.startListening().catch(() => {}) }
+  L.stopCapture = () => { L.stopListening() }
+  L.typed = text => { if (text) submitTurn(text) }
 
   return L
 }
@@ -457,6 +777,22 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
                       style: iconBtn,
                       children: jsx(MicIcon, { on: hot })
                     }),
+          jsx('button', {
+            type: 'button',
+            title: 'Re-arm mic — restart the listener if it went stale',
+            onClick: () => {
+              voiceLink.stop()
+              setTimeout(() => voiceLink.start(), 150)
+            },
+            style: iconBtn,
+            children: jsxs('svg', {
+              width: '18', height: '18', viewBox: '0 0 24 24',
+              children: [
+                jsx('path', { d: 'M4 12a8 8 0 0 1 13.6-5.7M20 12a8 8 0 0 1-13.6 5.7', stroke: JV.cyan, strokeWidth: '1.6', fill: 'none', strokeLinecap: 'round' }),
+                jsx('path', { d: 'M18 3v4h-4M6 21v-4h4', stroke: JV.cyan, strokeWidth: '1.6', fill: 'none', strokeLinecap: 'round', strokeLinejoin: 'round' })
+              ]
+            })
+          }),
           jsx('button', {
             type: 'button',
             title: 'Type — toggle chat panel (25% width)',
@@ -815,6 +1151,9 @@ export default {
                 transcriptAtom.set(cur + 1)
               })
               voiceLink.log = transcriptLog
+              // Native gateway event stream → voice turn deltas (message.delta,
+              // message.interim, message.complete; subsystem events filtered inside).
+              host.onEvent('*', ev => { try { voiceLink.handleGatewayEvent(ev) } catch (e) {} })
 
     // Sidebar nav row "next to Kanban" (order 50). /lars is a RESOLVER: it
     // renders the last-visited page instead of a fixed home.

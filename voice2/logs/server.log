@@ -1,0 +1,110 @@
+lars voice2 → http://127.0.0.1:1122  mode=hermes hermes=http://127.0.0.1:8642/p/lars2
+[pocket-tts] not running at http://127.0.0.1:8001 and POCKET_CMD is blank. Start it yourself.
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.user hello
+[diag] brain prompt.submit -> {"status":"streaming","user_row_id":43}
+[diag] voice.lars Hello! How can I assist you today?
+[diag] voice.err tts: Failed to fetch
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.user what time is it
+[diag] session adopted focused api_1791144247_e41e8057
+[diag] brain prompt.submit -> {"status":"streaming","user_row_id":45}
+[diag] voice.err stt: network
+[diag] voice.lars 2026‑10‑05 17:53 SAST.
+[diag] voice.lars Let me know if you need anything else!
+[diag] voice.sys lars done speaking
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.err stt: network
+[diag] voice.user Okay, testing large. Can you hear me?
+[diag] voice.user Okay, testing large. Can you hear me?
+[diag] session adopted focused api_1791144247_e41e8057
+[diag] brain prompt.submit -> {"status":"streaming","user_row_id":49}
+[diag] voice.lars Yes, I can hear you.
+[diag] voice.sys lars done speaking
+[diag] voice.user Okay, so here's what I think we should do.
+[diag] voice.user Okay, so here's what I think we should do.
+[diag] session adopted focused api_1791144247_e41e8057
+[diag] brain prompt.submit -> {"status":"streaming","user_row_id":51}
+[diag] voice.lars Sounds good—what’s the first step you’d like to take?
+[diag] voice.sys lars done speaking
+[diag] voice.user see what model you are and what you're trained.
+[diag] voice.user see what model you are and what you're trained.
+[diag] session adopted focused api_1791144247_e41e8057
+[diag] brain prompt.submit -> {"status":"streaming","user_row_id":53}
+[diag] voice.lars I'm running the gpt‑oss‑120b model, provided via a custom backend.Sorry, I’m not sure how to answer that.I'm the gpt‑oss‑120b model, a large open‑source languag
+[diag] voice.user Lars, how are you now?
+[diag] session adopted focused api_1791144247_e41e8057
+[diag] brain prompt.submit -> {"status":"streaming","user_row_id":55}
+[diag] voice.lars I’m Lars, your voice‑assistant inside Hermes—ready and listening.
+[diag] voice.sys lars done speaking
+[diag] voice.user What is your skills list?
+[diag] session adopted focused api_1791144247_e41e8057
+[diag] brain prompt.submit -> {"status":"streaming","user_row_id":57}
+[diag] voice.sys barge-in
+[diag] voice.sys stt heard nothing (too quiet?)
+[diag] voice.sys stt heard nothing (too quiet?)
+[diag] voice.sys stt heard nothing (too quiet?)
+[diag] voice.sys stt heard nothing (too quiet?)
+[diag] voice.sys stt heard nothing (too quiet?)
+[diag] voice.sys stt heard nothing (too quiet?)
+[diag] voice.user What is your skills list?
+[diag] session adopted focused api_1791144247_e41e8057
+[diag] brain prompt.submit -> {"status":"streaming","user_row_id":61}
+[diag] voice.lars I have 51 skills across categories like autonomous‑AI agents,
+[diag] voice.lars creative, email, media, note‑taking, productivity, research, software‑development, and web.
+[diag] voice.lars Use skill view to see each skill’s full details.
+[diag] voice.lars Let me know if you’d like a specific one.
+[diag] voice.sys barge-in
+[diag] voice.user the first four.
+[diag] session adopted focused api_1791144247_e41e8057
+[diag] brain prompt.submit -> {"status":"streaming","user_row_id":63}
+[diag] voice.lars 1. claude‑code – delegate coding to Claude Code CLI. 2. codex – delegate coding to OpenAI Codex CLI. 3. computer‑use – drive the desktop,
+[diag] voice.lars escalating when needed. 4.
+[diag] voice.lars hermes‑agent – configure, theme, extend, and orchestrate Hermes Agent.
+[diag] voice.sys barge-in
+[diag] voice.sys barge-in
+[diag] voice.user Okay, that's fine. Which one is your favorite?
+[diag] session adopted focused api_1791144247_e41e8057
+[diag] brain prompt.submit -> {"status":"streaming","user_row_id":65}
+[diag] voice.lars My favorite is hermes‑agent —it lets me configure,
+[diag] voice.lars extend, and orchestrate the Hermes environment directly.

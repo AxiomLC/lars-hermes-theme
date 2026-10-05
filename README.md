@@ -1,205 +1,106 @@
 # lars-hermes-theme
 
-> **Build 2026-09-25** — Titlebar utilities overhaul: live Hermes CPU/RAM/HDD via Python backend,
-> profile-specific model reading, standalone stats server on :9120 (mounted via gateway plugin API).
-> Active development on `machine-2`.
+> **Beta 2.0 — streaming Lars voice chat.** Jarvis-style Divisions UI for the
+> [Hermes Agent](https://github.com/NousResearch/hermes-agent) desktop app, now with a
+> working voice loop: local Whisper STT → `lars2` profile brain (Cerebras `gpt-oss-120b`,
+> streaming) → Pocket TTS spoken live with barge-in.
 
-The **Lars** platform UI for [Hermes Agent](https://github.com/NousResearch/hermes-agent) — AxiomLC's
-master agent command center, split into **Divisions** (Div 7 Master "Lars", plus Comms / Clients /
-Records / Production / Debug / Public).
-
-> **Live install at:** `%LOCALAPPDATA%\hermes\desktop-plugins\lars\` — this folder IS the git repo.
-> Edit directly, no copy step. Python backend at `plugins/lars/dashboard/` is junction-linked to
-> the gateway's expected path at `%LOCALAPPDATA%\hermes\plugins\lars\dashboard\`.
-
-**Status: STABLE TEMPLATE STRUCTURE — decided.** The primary surface is the **Hermes Electron desktop
-app** running our **desktop plugin SDK build** (`desktop-plugins/lars/plugin.js`). Development and daily
-use happen there. The browser dashboard (`:9119`) stays running for whatever endpoints we need from it;
-the browser-plugin half of `plugins/lars/` is kept for no-conflict and is NOT the UI direction.
-
-Build docs that are part of this design, referenced here and living in this repo:
-
-- **Voice/Mic (Div 7)** → [Voice-AI-README.md](Voice-AI-README.md) — the agreed build spec (rev 2):
-  local STT/TTS service, AudioWorklet PCM capture, wake word, barge-in, WS protocol, security.
-- **Resource monitor/utilities** → [Utility-Monitor-README.md](Utility-Monitor-README.md) — the design
-  for a whole-tree Hermes process monitor (replaces the stripped utilities rail; not built yet).
+**This README covers install + run only.** Deep technical reference (library settings,
+function map, dynamic logs, debug procedures, future HUD build) lives in
+[**techREADME.md**](techREADME.md) and [voice2/README.md](voice2/README.md).
 
 ---
 
-## Quick Install (fresh machine, default Hermes install)
+## What Lars does
 
-### Prerequisites
-- Windows 10/11 (tested)
-- [Hermes Agent desktop app](https://github.com/NousResearch/hermes-agent) installed (v0.21.4+)
-- Git
+The Lars plugin is the master command center for the Hermes desktop app — seven
+"Division" pages under one shell:
 
-### 1. Install Hermes (if not already)
+- **Div 7 Exec (`/lars`)** — home; staggered click-to-expand boxes (stats, comms,
+  n8n, stocks, browser panel…), the floating **JarvisMic** voice module, and the
+  voice **transcript + type box** (panel mode).
+- **Div 1 Comms** — messaging triage surface (Slack/WhatsApp/email land in the
+  Hermes gateway; Lars pages read/send via the profile agent).
+- **Div 2 Clients · Div 3 Records · Div 6 CRM** — client runbooks, record lookup,
+  CRM prompts routed to the profile agent.
+- **Div 4 Code Prod · Div 5 Debug** — production/debug prompts for coding agents.
+- **Titlebar ownership** while a Lars page is up: left = Lars logo/name; right =
+  desktop params (`Lars model`, `Ver`, `OS`, `Gateway`, `Agents`, `Sessions`,
+  `Uptime`) + resources (`CPU`, `RAM`, `HDD`) from the gateway-mounted
+  `plugin_api.py` (`/stats`).
+
+Voice chat (Beta 2.0): hot-mic with 2 s silence commit, streamed LLM reply spoken
+sentence-by-sentence via Pocket TTS, **barge-in** ("stop" or just talk over it) and
+a **re-arm** button on the JarvisMic. Voice turns run in the same native `lars2`
+session as typed turns (voice ⇄ typed continuity).
+
+## Stack
+
+| Layer | Thing | Where |
+|---|---|---|
+| UI | Hermes desktop plugin (`plugin.js`, plain ESM, `@hermes/plugin-sdk` + react only) | this repo |
+| Brain | Hermes profile `lars2` — Cerebras `gpt-oss-120b`, reasoning low, streaming | `%LOCALAPPDATA%\hermes\profiles\lars2\` |
+| STT | `voice2/stt_local.py` — faster-whisper `base`, CPU, Flask, `:8107` | `voice2/` |
+| TTS | Pocket TTS (`uvx pocket-tts serve`), voice `alba`, `:8000` | external pip tool |
+| Transport | Native gateway RPC (`prompt.submit`/`host.onEvent`) — **no API server in the voice loop** | Hermes |
+| Diag/TLS helper | `voice2/server.js`, `:1122` (diag mirror + optional SSE bridge) | `voice2/` |
+
+## Install
+
+Prereqs: Windows 10/11, [Hermes Agent](https://github.com/NousResearch/hermes-agent)
+(v0.21.4+), Git, Python 3.11+ (`pip install faster-whisper flask`), Node ≥20.6 for
+voice2 server.
+
 ```powershell
+# 1. Hermes (if not already)
 scoop install hermes-agent
-# OR download hermes-setup.exe from GitHub releases
-```
 
-### 2. Clone this repo
-```powershell
+# 2. Clone + install the plugin
 git clone https://github.com/AxiomLC/lars-hermes-theme.git
 cd lars-hermes-theme
-git checkout main
+New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\hermes\desktop-plugins\lars" | Out-Null
+Copy-Item .\plugin.js "$env:LOCALAPPDATA\hermes\desktop-plugins\lars\plugin.js" -Force
 ```
 
-### 3. Install the desktop plugin (one-time)
-The plugin lives in `desktop-plugins/lars/plugin.js`. Copy it to Hermes' plugin door:
+Then create the **`lars2` profile** in the Hermes desktop UI (Settings → profiles):
+set model/provider to `custom` + `https://api.cerebras.ai/v1` + `gpt-oss-120b`,
+reasoning `low`, put your `CEREBRAS_API_KEY` in the profile `.env`, and trim its
+skills list (see `techREADME.md` §lars2 profile).
 
-```powershell
-$src = ".\desktop-plugins\lars\plugin.js"
-$dst = "$env:LOCALAPPDATA\hermes\desktop-plugins\lars\plugin.js"
-New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
-Copy-Item $src $dst -Force
-```
+## Run
 
-### 4. Reload the desktop plugin (hot reload)
-```powershell
-# In Hermes desktop: ⌘K → "Reload desktop plugins"
-```
-You should now see:
-- **Sidebar → "Lars"** (order 50, next to Kanban)
-- Clicking "Lars" opens the **Div 7 Master page** (resolver to last-visited Div page)
-- Left rail: 7 Div menu items (7/1/2/3/4/5/6) with per-Div colors, collapsible to thin strip
-- **Rail logo**: real Lars logo above the "Lars" wordmark (embedded data URI — disk plugins load via
-  Blob URL, so no relative file references)
-- **JarvisMic** reactor (lower-right, floating: no border/background, pulse orb + waveform bars;
-  graphic placeholder — real voice per Voice-AI-README.md)
-- **Titlebar ownership while on Div 7**: left slot shows Lars logo + name; right slot shows
->  desktop params (`Lars model`, `Ver`, `OS`, `Gateway`, `Agents`, `Sessions`, `Uptime`)
->  and resource use (`CPU`, `RAM`, `HDD`). Data fetched from gateway-mounted Python backend
->  (`plugin_api.py`) on 5s poll.
+1. **Gateway** — start Hermes desktop (it spawns the multiplex gateway that serves
+   every profile, incl. `lars2`). CLI check: `hermes -p default gateway status`.
+2. **TTS** — `uvx pocket-tts serve` (keep detached).
+3. **STT + helper** — `cd voice2 && start.bat` (STT detached on `:8107`, server on `:1122`).
+4. **Plugin** — click **Lars** in the sidebar; mic button arms voice.
 
-The Python backend is at `plugins/lars/dashboard/plugin_api.py` — mounted by the gateway via
-dashboard manifest.json (`"api": "plugin_api.py"`), serving `/stats` for the titlebar chips.
+Port map: `:9119` dashboard · `:8642` API server (external automation; not the voice
+loop) · `:5678` n8n · `:5432` PostgreSQL · `:1122` voice2 · `:8107` STT · `:8000` TTS.
 
----
-
-## What's in this repo (main)
+## Repo layout
 
 ```
 lars-hermes-theme/
-├── desktop-plugins/lars/
-│   ├── plugin.js                  # DESKTOP PLUGIN (primary) — copy to %LOCALAPPDATA%\hermes\desktop-plugins\lars\
-│   └── logo.png                   # Lars logo source (full-res; plugin embeds a downscaled data URI)
-├── plugins/lars/
-│   ├── dashboard/                 # browser dashboard plugin (legacy) + Python backend
-│   │   ├── manifest.json
-│   │   ├── plugin_api.py          # Python backend — serves /stats for titlebar chips
-│   │   └── dist/index.js
-│   └── theme/strike-freedom.yaml  # dashboard theme (legacy)
-├── specs/
-│   ├── layout-master.md           # canonical page layout spec
-│   └── Hermes_Gateway.vbs         # gateway + stats server startup script
-├── themes/hinokami-night.yaml     # desktop theme (dark)
-├── themes/lars-yakuza.yaml        # desktop theme (light)
-├── Voice-AI-README.md             # voice/mic build spec (rev 2) — agreed design
-├── Utility-Monitor-README.md      # resource monitor build spec — agreed design
-└── README.md                      # this file
+├── plugin.js                # the desktop plugin — pages, JarvisMic, whole voice engine
+├── plugins/lars/            # browser-dashboard half (legacy) + plugin_api.py stats backend
+├── specs/Hermes_Gateway.vbs # boot helper (gateway + stats)
+├── themes/                  # desktop themes (hinokami-night, lars-yakuza)
+└── voice2/                  # Beta 2.0 voice module — see voice2/README.md
+    ├── server.js  stt_local.py  start.bat  .env
+    ├── public/              # standalone tester page for the voice loop
+    └── logs/                # self-pruning runtime logs
 ```
 
-**Key file for a fresh install:** `desktop-plugins/lars/plugin.js` (single file, everything else optional).
-
----
-
-## Architecture (current build)
-
-### Desktop Plugin SDK (primary — the decided surface)
-- **Entry point:** `desktop-plugins/lars/plugin.js` (plain ESM, no build, hot reload)
-- **Import surface:** `@hermes/plugin-sdk` + `react` + `react/jsx-runtime` **only** — the renderer
-  resolves nothing else. External libs must be inlined or moved to the Python backend.
-- **Route areas:** 7 `ROUTES_AREA` pages at `/lars`, `/lars-comms`, `/lars-clients`,
-  `/lars-records`, `/lars-production`, `/lars-debug`, `/lars-crm`
-- **Sidebar nav:** 1 `SIDEBAR_NAV_AREA` row ("Lars", codicon, order 50); ⌘K palette entry too
-- **Resolver:** `/lars` restores `lastPage` from `ctx.storage` + per-page state (collapsed menu,
-  expanded boxes, scroll position) — nav away and back keeps state
-- **Titlebar:** while Div 7 is up, mount-scoped `<Contribute>` into `titleBar.left`/`titleBar.right`
->  makes the page own the chrome — app clusters hide, Lars chips render. Left: logo + name.
->  Right: desktop params (`Lars model`, `Ver`, `OS`, `Gateway`, `Agents`, `Sessions`, `Uptime`)
->  + resources (`CPU`, `RAM`, `HDD`). Data via `pluginCtx.rest('/stats')` (gateway plugin API).
-- **Voice module:** `JarvisMic` — floating reactor graphic (no border/bg), EXPAND → core Session chat
-  (native voice). Real voice per **Voice-AI-README.md**.
-- **Theme:** Jarvis palette (cyan `#40f3ff`, amber `#ffb648`, near-black `#02070c`, Chakra Petch +
-  JetBrains Mono)
-
-### Ports on this machine (current state)
-| What | Port | Notes |
-|---|---|---|
-| Hermes browser dashboard | **:9119** | running — endpoints available there for whatever we need |
-| Hermes gateway (stats API) | **:8642** | gateway + plugin API mounted via dashboard manifest |
-| n8n (automation hub) | **:5678** | bare-metal |
-| PostgreSQL | **:5432** | local |
-| pgweb | **:8081** | reads `PGPASSWORD` from `.env` |
-
-Hermes home: `C:\Users\q1fre\AppData\Local\hermes\` · Secrets in `.env` (OPENROUTER_API_KEY,
-DEEPINFRA_API_KEY, GROQ_API_KEY, ELEVENLABS_API_KEY, N8N_API_KEY, PGPASSWORD, SLACK_*, WHATSAPP_*,
-META_ACCESS_TOKEN)
-
----
-
-## Development workflow
-
-### Edit the desktop plugin
-```powershell
-# Edit source, save → Hermes hot-reloads (or ⌘K → Reload desktop plugins)
-code .\desktop-plugins\lars\plugin.js
-# Syntax check, then sync to the live door:
-node --check .\desktop-plugins\lars\plugin.js
-Copy-Item .\desktop-plugins\lars\plugin.js "$env:LOCALAPPDATA\hermes\desktop-plugins\lars\plugin.js" -Force
-```
-
-### Edit the Python backend
-```powershell
-code .\plugins\lars\dashboard\plugin_api.py
-python -m py_compile .\plugins\lars\dashboard\plugin_api.py
-Copy-Item .\plugins\lars\dashboard\plugin_api.py "$env:LOCALAPPDATA\hermes\plugins\lars\dashboard\plugin_api.py" -Force
-# Restart gateway to pick up changes
-```
-
-### Sync to repo
-```powershell
-git add -A
-git commit -m "message"
-git push origin machine-2     # develop on machine-2
-git push origin main          # promote to main when stable
-```
-
----
-
-## Branching strategy (current)
-
-- **`machine-2`** — development fork; work happens here.
-- **`main`** — canonical/stable current; promoted from `machine-2` when stable (forced-update to
-  match, since both machines share this repo and `main` was re-based onto the desktop-plugin build).
-- Both machines + mobile share this repo; `machine-2` work is the source that `main` mirrors.
-
----
-
-## Troubleshooting
+## Troubleshooting (quick)
 
 | Symptom | Fix |
 |---|---|
-| "Plugin lars failed to load" toast | Check `plugin.js` syntax: `node --check %LOCALAPPDATA%\hermes\desktop-plugins\lars\plugin.js` |
-| JarvisMic not animating | `⌘K → Reload desktop plugins`; ensure no JS errors in devtools (F12 in Hermes) |
-| Sidebar "Lars" missing | Plugin not loaded; check door path matches exactly `desktop-plugins\lars\plugin.js` |
-| Titlebar chips not showing on Div 7 | Reload plugins; chips mount only while a Lars page is up (mount-scoped `titleBar.*`) |
-| Theme not applying | Themes register in `THEMES_AREA`; select via ⌘K |
-
----
-
-## References
-
-| Ref | Covers |
-|---|---|
-| https://hermes-agent.nousresearch.com/docs/developer-guide/desktop-plugin-sdk | **Desktop plugin SDK** — the surface we build on |
-| [Voice-AI-README.md](Voice-AI-README.md) | Voice/mic build spec (rev 2) — agreed |
-| [Utility-Monitor-README.md](Utility-Monitor-README.md) | Resource monitor build spec — agreed |
-| https://github.com/Itsme23476/jarvis-hermes-dashboard | Styling source (local clone in `Git-Repos/`) |
-| https://hermes-agent.nousresearch.com/docs/ | Hermes docs (dashboard/desktop/plugins) |
-
----
+| Plugin fails to load | `node --check plugin.js`; reload via ⌘K → Reload desktop plugins |
+| `stt: network` / no transcripts | STT server down → `curl :8107/health`; restart via `start.bat` |
+| Transcript shows your text twice | stale build — reload plugins (fixed in Beta 2.0) |
+| Barge-in never fires | turn **arm** on before Lars speaks; if still silent, check mic level vs `BARGE_RMS` in `plugin.js` CFG |
+| TTS `Failed to fetch` | Pocket TTS not running → `uvx pocket-tts serve` |
+| Typed path dead | gateway down → `hermes -p default gateway restart` |
 
 MIT — part of the Lars platform (AxiomLC).

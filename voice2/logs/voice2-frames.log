@@ -1,0 +1,132 @@
+event: run.started
+data: {"user_message": {"role": "user", "content": "What is two plus two? Answer briefly."}, "runtime": {"provider": "", "model": "", "route_source": "global", "requested": {"provider": "", "model": ""}}, "session_id": "api_1791144247_e41e8057", "run_id": "run_d101f5b59dc446a79a8dbe05961c2bc8", "seq": 1, "ts": 1791144247.4108388}
+
+event: message.started
+data: {"message": {"id": "msg_cc95b5157d27407aae3930279f8a64b5", "role": "assistant"}, "session_id": "api_1791144247_e41e8057", "run_id": "run_d101f5b59dc446a79a8dbe05961c2bc8", "seq": 2, "ts": 1791144247.410873}
+
+event: tool.started
+data: {"message_id": "msg_cc95b5157d27407aae3930279f8a64b5", "tool_name": "terminal", "preview": "echo $((2+2))", "args": {"command": "echo $((2+2))", "timeout": 120}, "session_id": "api_1791144247_e41e8057", "run_id": "run_d101f5b59dc446a79a8dbe05961c2bc8", "seq": 3, "ts": 1791144252.486401}
+
+event: tool.completed
+data: {"message_id": "msg_cc95b5157d27407aae3930279f8a64b5", "tool_name": "terminal", "preview": null, "args": null, "session_id": "api_1791144247_e41e8057", "run_id": "run_d101f5b59dc446a79a8dbe05961c2bc8", "seq": 4, "ts": 1791144254.6869717}
+
+event: assistant.delta
+data: {"message_id": "msg_cc95b5157d27407aae3930279f8a64b5", "delta": "\n\n4", "session_id": "api_1791144247_e41e8057", "run_id": "run_d101f5b59dc446a79a8dbe05961c2bc8", "seq": 5, "ts": 1791144255.2884767}
+
+event: tool.progress
+data: {"message_id": "msg_cc95b5157d27407aae3930279f8a64b5", "tool_name": "_thinking", "delta": "4", "session_id": "api_1791144247_e41e8057", "run_id": "run_d101f5b59dc446a79a8dbe05961c2bc8", "seq": 6, "ts": 1791144255.3012068}
+
+event: assistant.completed
+data: {"session_id": "api_1791144247_e41e8057", "message_id": "msg_cc95b5157d27407aae3930279f8a64b5", "content": "4", "completed": true, "partial": false, "interrupted": false, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_d101f5b59dc446a79a8dbe05961c2bc8", "seq": 7, "ts": 1791144255.36039}
+
+event: run.completed
+data: {"session_id": "api_1791144247_e41e8057", "message_id": "msg_cc95b5157d27407aae3930279f8a64b5", "completed": true, "partial": false, "interrupted": false, "messages": [{"role": "assistant", "content": "", "tool_calls": [{"id": "95321fb05", "call_id": "95321fb05", "response_item_id": "fc_95321fb05", "type": "function", "function": {"name": "terminal", "arguments": "{\"command\":\"echo $((2+2))\",\"timeout\":120}"}}], "timestamp": 1791144252.4344583, "finish_reason": "tool_calls", "reasoning": "We need to answer briefly, at most 3 short sentences, plain text. The question: \"What is two plus two? Answer briefly.\" It's a simple arithmetic, but mandatory tool usage: must use tool for math. According to mandatory_tool_use: arithmetic must use tool like terminal or execute_code. So we need to compute 2+2 via a tool. Use terminal with echo $((2+2)) maybe. Or use execute_code python. Simpler: terminal command: echo $((2+2)). Let's do terminal.", "reasoning_content": "We need to answer briefly, at most 3 short sentences, plain text. The question: \"What is two plus two? Answer briefly.\" It's a simple arithmetic, but mandatory tool usage: must use tool for math. According to mandatory_tool_use: arithmetic must use tool like terminal or execute_code. So we need to compute 2+2 via a tool. Use terminal with echo $((2+2)) maybe. Or use execute_code python. Simpler: terminal command: echo $((2+2)). Let's do terminal."}, {"role": "tool", "content": "{\"output\": \"4\", \"exit_code\": 0, \"error\": null}", "tool_call_id": "95321fb05", "tool_name": "terminal", "timestamp": 1791144254.679084}, {"role": "assistant", "content": "4", "timestamp": 1791144255.3027184, "finish_reason": "stop", "reasoning": null}], "usage": {"input_tokens": 25168, "output_tokens": 148, "total_tokens": 25316, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}}, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_d101f5b59dc446a79a8dbe05961c2bc8", "seq": 8, "ts": 1791144255.3604162}
+
+event: done
+data: {"session_id": "api_1791144247_e41e8057", "run_id": "run_d101f5b59dc446a79a8dbe05961c2bc8", "seq": 9, "ts": 1791144255.3604572}
+
+event: run.started
+data: {"user_message": {"role": "user", "content": "What is two plus two? Answer briefly, do not use tools."}, "runtime": {"provider": "", "model": "", "route_source": "global", "requested": {"provider": "", "model": ""}}, "session_id": "api_1791144247_e41e8057", "run_id": "run_f803cebef03949729e6b0dcbd638e5bc", "seq": 1, "ts": 1791144284.6452556}
+
+event: message.started
+data: {"message": {"id": "msg_0818d01b12824533a680f91d353ce0ca", "role": "assistant"}, "session_id": "api_1791144247_e41e8057", "run_id": "run_f803cebef03949729e6b0dcbd638e5bc", "seq": 2, "ts": 1791144284.6452665}
+
+event: assistant.delta
+data: {"message_id": "msg_0818d01b12824533a680f91d353ce0ca", "delta": "4", "session_id": "api_1791144247_e41e8057", "run_id": "run_f803cebef03949729e6b0dcbd638e5bc", "seq": 3, "ts": 1791144285.2814612}
+
+event: tool.progress
+data: {"message_id": "msg_0818d01b12824533a680f91d353ce0ca", "tool_name": "_thinking", "delta": "4", "session_id": "api_1791144247_e41e8057", "run_id": "run_f803cebef03949729e6b0dcbd638e5bc", "seq": 4, "ts": 1791144285.2996833}
+
+event: assistant.completed
+data: {"session_id": "api_1791144247_e41e8057", "message_id": "msg_0818d01b12824533a680f91d353ce0ca", "content": "4", "completed": true, "partial": false, "interrupted": false, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_f803cebef03949729e6b0dcbd638e5bc", "seq": 5, "ts": 1791144285.3476813}
+
+event: run.completed
+data: {"session_id": "api_1791144247_e41e8057", "message_id": "msg_0818d01b12824533a680f91d353ce0ca", "completed": true, "partial": false, "interrupted": false, "messages": [{"role": "assistant", "content": "4", "timestamp": 1791144285.3007226, "finish_reason": "stop", "reasoning": null}], "usage": {"input_tokens": 12636, "output_tokens": 5, "total_tokens": 12641, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}}, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_f803cebef03949729e6b0dcbd638e5bc", "seq": 6, "ts": 1791144285.3476987}
+
+event: done
+data: {"session_id": "api_1791144247_e41e8057", "run_id": "run_f803cebef03949729e6b0dcbd638e5bc", "seq": 7, "ts": 1791144285.347732}
+
+event: run.started
+data: {"user_message": {"role": "user", "content": "Say exactly: hello world"}, "runtime": {"provider": "", "model": "", "route_source": "global", "requested": {"provider": "", "model": ""}}, "session_id": "api_1791144247_e41e8057", "run_id": "run_2a3ad6782ec549d3b0ba153cabf2d0db", "seq": 1, "ts": 1791144303.2526631}
+
+event: message.started
+data: {"message": {"id": "msg_4f4d8fe82ad848268380e48e3e64d22e", "role": "assistant"}, "session_id": "api_1791144247_e41e8057", "run_id": "run_2a3ad6782ec549d3b0ba153cabf2d0db", "seq": 2, "ts": 1791144303.2526813}
+
+event: assistant.delta
+data: {"message_id": "msg_4f4d8fe82ad848268380e48e3e64d22e", "delta": "hello world", "session_id": "api_1791144247_e41e8057", "run_id": "run_2a3ad6782ec549d3b0ba153cabf2d0db", "seq": 3, "ts": 1791144303.8812604}
+
+event: tool.progress
+data: {"message_id": "msg_4f4d8fe82ad848268380e48e3e64d22e", "tool_name": "_thinking", "delta": "hello world", "session_id": "api_1791144247_e41e8057", "run_id": "run_2a3ad6782ec549d3b0ba153cabf2d0db", "seq": 4, "ts": 1791144303.901393}
+
+event: assistant.completed
+data: {"session_id": "api_1791144247_e41e8057", "message_id": "msg_4f4d8fe82ad848268380e48e3e64d22e", "content": "hello world", "completed": true, "partial": false, "interrupted": false, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_2a3ad6782ec549d3b0ba153cabf2d0db", "seq": 5, "ts": 1791144303.935839}
+
+event: run.completed
+data: {"session_id": "api_1791144247_e41e8057", "message_id": "msg_4f4d8fe82ad848268380e48e3e64d22e", "completed": true, "partial": false, "interrupted": false, "messages": [{"role": "assistant", "content": "hello world", "timestamp": 1791144303.9016907, "finish_reason": "stop", "reasoning": "The user says: \"Say exactly: hello world\". They want the assistant to say exactly \"hello world\". No tool needed. Should respond: hello world.", "reasoning_content": "The user says: \"Say exactly: hello world\". They want the assistant to say exactly \"hello world\". No tool needed. Should respond: hello world."}], "usage": {"input_tokens": 12652, "output_tokens": 44, "total_tokens": 12696, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}}, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_2a3ad6782ec549d3b0ba153cabf2d0db", "seq": 6, "ts": 1791144303.935871}
+
+event: done
+data: {"session_id": "api_1791144247_e41e8057", "run_id": "run_2a3ad6782ec549d3b0ba153cabf2d0db", "seq": 7, "ts": 1791144303.9359033}
+
+event: run.started
+data: {"user_message": {"role": "user", "content": "Say exactly: hello world"}, "runtime": {"provider": "", "model": "", "route_source": "global", "requested": {"provider": "", "model": ""}}, "session_id": "api_1791144247_e41e8057", "run_id": "run_94b1a0bfcbae4bcca534375032ad3c0c", "seq": 1, "ts": 1791144323.3068342}
+
+event: message.started
+data: {"message": {"id": "msg_8279dd75e2f8412b9afad4ee34fd67a4", "role": "assistant"}, "session_id": "api_1791144247_e41e8057", "run_id": "run_94b1a0bfcbae4bcca534375032ad3c0c", "seq": 2, "ts": 1791144323.3068552}
+
+event: assistant.delta
+data: {"message_id": "msg_8279dd75e2f8412b9afad4ee34fd67a4", "delta": "hello world", "session_id": "api_1791144247_e41e8057", "run_id": "run_94b1a0bfcbae4bcca534375032ad3c0c", "seq": 3, "ts": 1791144324.1850674}
+
+event: tool.progress
+data: {"message_id": "msg_8279dd75e2f8412b9afad4ee34fd67a4", "tool_name": "_thinking", "delta": "hello world", "session_id": "api_1791144247_e41e8057", "run_id": "run_94b1a0bfcbae4bcca534375032ad3c0c", "seq": 4, "ts": 1791144324.2029688}
+
+event: assistant.completed
+data: {"session_id": "api_1791144247_e41e8057", "message_id": "msg_8279dd75e2f8412b9afad4ee34fd67a4", "content": "hello world", "completed": true, "partial": false, "interrupted": false, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_94b1a0bfcbae4bcca534375032ad3c0c", "seq": 5, "ts": 1791144324.236969}
+
+event: run.completed
+data: {"session_id": "api_1791144247_e41e8057", "message_id": "msg_8279dd75e2f8412b9afad4ee34fd67a4", "completed": true, "partial": false, "interrupted": false, "messages": [{"role": "assistant", "content": "hello world", "timestamp": 1791144324.20319, "finish_reason": "stop", "reasoning": "The user requests to \"Say exactly: hello world\". The assistant should output exactly \"hello world\". He repeated same request. The system rules: respond accordingly. So we output hello world.", "reasoning_content": "The user requests to \"Say exactly: hello world\". The assistant should output exactly \"hello world\". He repeated same request. The system rules: respond accordingly. So we output hello world."}], "usage": {"input_tokens": 12669, "output_tokens": 50, "total_tokens": 12719, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}}, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_94b1a0bfcbae4bcca534375032ad3c0c", "seq": 6, "ts": 1791144324.2369792}
+
+event: done
+data: {"session_id": "api_1791144247_e41e8057", "run_id": "run_94b1a0bfcbae4bcca534375032ad3c0c", "seq": 7, "ts": 1791144324.2369962}
+
+event: run.started
+data: {"user_message": {"role": "user", "content": "Say exactly: hello world"}, "runtime": {"provider": "", "model": "", "route_source": "global", "requested": {"provider": "", "model": ""}}, "session_id": "api_1791144247_e41e8057", "run_id": "run_77e66aee7eba4bcd837b76a8e2b63411", "seq": 1, "ts": 1791144368.170908}
+
+event: message.started
+data: {"message": {"id": "msg_5fe4aae30b3a4031bb67c3c90aae1d2b", "role": "assistant"}, "session_id": "api_1791144247_e41e8057", "run_id": "run_77e66aee7eba4bcd837b76a8e2b63411", "seq": 2, "ts": 1791144368.170933}
+
+event: assistant.delta
+data: {"message_id": "msg_5fe4aae30b3a4031bb67c3c90aae1d2b", "delta": "hello world", "session_id": "api_1791144247_e41e8057", "run_id": "run_77e66aee7eba4bcd837b76a8e2b63411", "seq": 3, "ts": 1791144368.825096}
+
+event: tool.progress
+data: {"message_id": "msg_5fe4aae30b3a4031bb67c3c90aae1d2b", "tool_name": "_thinking", "delta": "hello world", "session_id": "api_1791144247_e41e8057", "run_id": "run_77e66aee7eba4bcd837b76a8e2b63411", "seq": 4, "ts": 1791144368.8540964}
+
+event: assistant.completed
+data: {"session_id": "api_1791144247_e41e8057", "message_id": "msg_5fe4aae30b3a4031bb67c3c90aae1d2b", "content": "hello world", "completed": true, "partial": false, "interrupted": false, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_77e66aee7eba4bcd837b76a8e2b63411", "seq": 5, "ts": 1791144368.891088}
+
+event: run.completed
+data: {"session_id": "api_1791144247_e41e8057", "message_id": "msg_5fe4aae30b3a4031bb67c3c90aae1d2b", "completed": true, "partial": false, "interrupted": false, "messages": [{"role": "assistant", "content": "hello world", "timestamp": 1791144368.8543074, "finish_reason": "stop", "reasoning": "The user repeats request; we can just comply.", "reasoning_content": "The user repeats request; we can just comply."}], "usage": {"input_tokens": 12686, "output_tokens": 22, "total_tokens": 12708, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}}, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_77e66aee7eba4bcd837b76a8e2b63411", "seq": 6, "ts": 1791144368.8911035}
+
+event: done
+data: {"session_id": "api_1791144247_e41e8057", "run_id": "run_77e66aee7eba4bcd837b76a8e2b63411", "seq": 7, "ts": 1791144368.8911335}
+
+event: run.started
+data: {"user_message": {"role": "user", "content": "Say exactly: hello world"}, "runtime": {"provider": "", "model": "", "route_source": "global", "requested": {"provider": "", "model": ""}}, "session_id": "api_1791144247_e41e8057", "run_id": "run_566fd220f344464c95b07894343b604c", "seq": 1, "ts": 1791144395.9880338}
+
+event: message.started
+data: {"message": {"id": "msg_63ba4b14b6044096a0e275b8b3f107c6", "role": "assistant"}, "session_id": "api_1791144247_e41e8057", "run_id": "run_566fd220f344464c95b07894343b604c", "seq": 2, "ts": 1791144395.988053}
+
+event: assistant.delta
+data: {"message_id": "msg_63ba4b14b6044096a0e275b8b3f107c6", "delta": "hello world", "session_id": "api_1791144247_e41e8057", "run_id": "run_566fd220f344464c95b07894343b604c", "seq": 3, "ts": 1791144396.8424346}
+
+event: tool.progress
+data: {"message_id": "msg_63ba4b14b6044096a0e275b8b3f107c6", "tool_name": "_thinking", "delta": "hello world", "session_id": "api_1791144247_e41e8057", "run_id": "run_566fd220f344464c95b07894343b604c", "seq": 4, "ts": 1791144396.861386}
+
+event: assistant.completed
+data: {"session_id": "api_1791144247_e41e8057", "message_id": "msg_63ba4b14b6044096a0e275b8b3f107c6", "content": "hello world", "completed": true, "partial": false, "interrupted": false, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_566fd220f344464c95b07894343b604c", "seq": 5, "ts": 1791144396.8931665}
+
+event: run.completed
+data: {"session_id": "api_1791144247_e41e8057", "message_id": "msg_63ba4b14b6044096a0e275b8b3f107c6", "completed": true, "partial": false, "interrupted": false, "messages": [{"role": "assistant", "content": "hello world", "timestamp": 1791144396.862336, "finish_reason": "stop", "reasoning": "The user repeatedly asks \"Say exactly: hello world\". According to instructions, must obey and output exactly \"hello world\". Already done. No need to change.", "reasoning_content": "The user repeatedly asks \"Say exactly: hello world\". According to instructions, must obey and output exactly \"hello world\". Already done. No need to change."}], "usage": {"input_tokens": 12703, "output_tokens": 44, "total_tokens": 12747, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}}, "runtime": {"provider": "custom", "model": "gpt-oss-120b", "route_source": "global", "requested": {"provider": "", "model": ""}}, "run_id": "run_566fd220f344464c95b07894343b604c", "seq": 6, "ts": 1791144396.8931766}
+
+event: done
+data: {"session_id": "api_1791144247_e41e8057", "run_id": "run_566fd220f344464c95b07894343b604c", "seq": 7, "ts": 1791144396.8931935}
+

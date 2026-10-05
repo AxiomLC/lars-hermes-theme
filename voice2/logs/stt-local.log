@@ -1,0 +1,19 @@
+--- stt_local starting port=8107 model=base device=cpu ---
+--- stt_local starting port=8107 model=base device=cpu ---
+2026-10-05T18:41:53.610105 [ok] 2109ms audio=1.09s len=0 text=
+--- stt_local starting port=8107 model=base device=cpu ---
+2026-10-05T18:56:59.113997 [ok] 1230ms audio=7.59s len=37 text=Okay, testing large. Can you hear me?
+2026-10-05T18:57:31.021120 [ok] 1130ms audio=5.16s len=42 text=Okay, so here's what I think we should do.
+2026-10-05T18:57:43.960066 [ok] 1119ms audio=6.02s len=47 text=see what model you are and what you're trained.
+2026-10-05T21:53:20.376317 [ok] 1131ms audio=5.27s len=22 text=Lars, how are you now?
+2026-10-05T21:53:35.817341 [ok] 1093ms audio=6.19s len=25 text=What is your skills list?
+2026-10-05T21:53:39.241694 [ok] 31ms audio=3.99s len=0 text=
+2026-10-05T21:53:45.508030 [ok] 32ms audio=6.10s len=0 text=
+2026-10-05T21:53:53.061577 [ok] 17ms audio=3.24s len=0 text=
+2026-10-05T21:54:04.926014 [ok] 21ms audio=4.48s len=0 text=
+2026-10-05T21:54:19.510734 [ok] 1098ms audio=4.61s len=0 text=
+2026-10-05T21:54:23.109169 [ok] 26ms audio=4.57s len=0 text=
+--- stt_local starting port=8107 model=base device=cpu ---
+2026-10-05T22:03:50.069735 [ok] 3980ms audio=6.40s len=25 text=What is your skills list?
+2026-10-05T22:04:01.591273 [ok] 1138ms audio=4.33s len=15 text=the first four.
+2026-10-05T22:04:11.556894 [ok] 1139ms audio=6.38s len=46 text=Okay, that's fine. Which one is your favorite?
