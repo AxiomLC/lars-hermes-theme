@@ -5,3 +5,8 @@ voice/models/
 voice/voice_server.log
 voice/debug_last.wav
 HANDOFF-STREAMING.md
+
+# secrets & runtime state
+voice2/.env
+voice2/logs/
+*.log
