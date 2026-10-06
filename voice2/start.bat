@@ -1,11 +1,23 @@
 @echo off
 cd /d %~dp0
-:: Lars voice helpers — only the local STT endpoint is needed now:
-::   STT :8107 (faster-whisper 'base') — the plugin page talks to it directly.
-:: TTS is Pocket TTS (:8000, started separately: uvx pocket-tts serve).
-:: Brain is the lars2 Hermes profile over native gateway RPC — no helper server.
-:: Diagnostics live in Hermes: ~\AppData\Local\hermes\plugins\lars\voice-events.log
-:: (gateway-mounted plugin_api /voice-log, last 100 entries).
+:: Lars voice services — starts everything the plugin needs besides Hermes itself:
+::   STT :8107 (faster-whisper 'base')   - voice2\stt_local.py, starts detached here
+::   TTS :8000 (Pocket TTS)              - reused if already up, else started detached
+:: Hermes brings up its own backend (:9119) + multiplex gateway when the desktop
+:: app starts. Diagnostics: ~\AppData\Local\hermes\plugins\lars\voice-events.log
+
 set STT_PORT=8107
+
+:: --- Pocket TTS :8000 (reuse if up) ---
+curl -s -o nul --max-time 2 http://127.0.0.1:8000/health
+if errorlevel 1 (
+  echo Starting Pocket TTS on :8000 detached...
+  start "lars-tts" /min powershell -NoProfile -WindowStyle Hidden -Command "uvx pocket-tts serve"
+) else (
+  echo Pocket TTS already running on :8000, reusing.
+)
+
+:: --- STT :8107 ---
 start "lars-stt" /min powershell -NoProfile -WindowStyle Hidden -Command "python '%~dp0stt_local.py'"
-echo STT starting on :8107 (TTS :8000 and Hermes gateway must be up separately)
+echo STT starting on :8107.
+echo Voice ready once Hermes desktop is up and the Lars plugin is armed.
