@@ -5,28 +5,54 @@
 
 ## What's here
 
-- **`stt_local.py`** — Flask+faster-whisper STT endpoint on `:8107`.
+- **`stt_local.py`** — local STT endpoint on `:8107` (engine: **Moonshine** default,
+  faster-whisper fallback — see "Switching STT engine" below).
   - `POST /transcribe` — raw WAV body (`Content-Type: audio/wav`) or multipart
     (`audio` field) → `{text, language}`. Mono downmix built in, 12 MB cap.
-  - `GET /health` — `{ok, model, device}`.
-  - Reads sibling `.env` on boot: `STT_PORT`, `STT_MODEL` (default `base`;
-    `tiny` ≈2× faster — the latency knob), `STT_DEVICE` (`cpu`/`auto`),
-    `STT_COMPUTE`, `LARS_VOICE_TOKEN` (bearer gate; blank = open, local-only bind).
-  - **whisper's Silero VAD is OFF by design** — the Intel Smart mic-array channel
+  - `GET /health` — `{ok, engine, model, device}`.
+  - Reads sibling `.env` on boot: `STT_PORT`, `STT_ENGINE`, `STT_MOONSHINE_MODEL`,
+    `STT_MODEL` (whisper), `STT_DEVICE`, `STT_COMPUTE`. Loopback-only, no auth token.
+  - whisper's Silero VAD is OFF by design — the Intel Smart mic-array channel
     quirk made whisper's own VAD reject whole utterances; the plugin's energy-VAD
-    does segmentation, whisper just decodes.
-- **`start.bat`** — starts STT detached (minimized), nothing else.
+    does segmentation, the engine just decodes.
+- **`start.bat`** — one click: starts Pocket TTS `:8000` (reused if up) + STT `:8107`, both detached.
+- **`stop.bat`** — one click: kills both sidecars (`:8000` + `:8107` by port). Hermes untouched.
+
+### Switching STT engine (moonshine ⇄ whisper)
+
+Moonshine is the default (faster, better WER). If it misbehaves (quirky output,
+empty text on real speech), flip the FIRST choice back to whisper:
+
+1. Edit `voice2/.env`: set `STT_ENGINE=whisper` (and optionally `STT_MODEL=base|tiny|small`).
+2. Restart STT: run `stop.bat` then `start.bat`.
+3. Verify: `curl http://127.0.0.1:8107/health` → should report `"engine":"whisper"`.
+
+Conversely, to run moonshine again: `STT_ENGINE=moonshine` (recommended once stable).
+Whisper also auto-serves on a per-request basis if moonshine errors at runtime —
+see the `[warn] … falling back` line in `stt-local.log`.
+
+```
+
 - **`logs/`** (gitignored) — `stt-local.log`: per-request ms / audio-seconds /
   text, 300 KB cap with keep-tail-half pruning.
+
+```env
+# voice2/.env — current live values
+STT_PORT=8107
+STT_ENGINE=moonshine      # flip to 'whisper' to make whisper the first choice
+STT_MOONSHINE_MODEL=base  # moonshine: tiny | base
+# STT_MODEL=base          # whisper fallback engine only
+```
 
 ## The full voice loop (for context)
 
 ```
 mic → energy-VAD (plugin.js) → 16 kHz WAV → POST :8107/transcribe → text →
   prompt.submit (lars2 profile, native desktop session) → stream deltas →
-  sentence chunker → Pocket TTS :8000 ('alba') → gapless playback →
+  sentence chunker → Pocket TTS :8000 (voice set in plugin.js, currently `jean`) → gapless playback →
   energy barge-in / re-arm button
 ```
+(Pocket TTS voice is set in `../plugin.js` — `TTS_VOICE` constant, currently `jean`.)
 
 External processes that must be up: Pocket TTS (`uvx pocket-tts serve` → `:8000`)
 and the Hermes multiplex gateway (serves every profile incl. `lars2` —

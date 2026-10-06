@@ -40,7 +40,7 @@ session as typed turns (voice ⇄ typed continuity).
 |---|---|---|
 | UI | Hermes desktop plugin (`plugin.js`, plain ESM, `@hermes/plugin-sdk` + react only) | this repo |
 | Brain | Hermes profile `lars2` — Cerebras `gpt-oss-120b`, reasoning low, streaming | `%LOCALAPPDATA%\hermes\profiles\lars2\` |
-| STT | `voice2/stt_local.py` — faster-whisper `base`, CPU, Flask, `:8107` | `voice2/` |
+| STT | `voice2/stt_local.py` — **Moonshine** default (faster/better WER; `STT_ENGINE=whisper` flip available), CPU, Flask, `:8107` | `voice2/` |
 | TTS | Pocket TTS (`uvx pocket-tts serve`), voice `jean`, `:8000` | external pip tool |
 | Transport | Native gateway RPC (`prompt.submit`/`host.onEvent`) — **no API server in the voice loop** | Hermes |
 | Diag log | gateway-mounted `plugin_api.py` `POST /voice-log` → `hermes\plugins\lars\voice-events.log` (last 100 entries, agents-readable) | `plugins/lars/dashboard/` |
@@ -71,9 +71,8 @@ skills list (see `techREADME.md` §lars2 profile).
 
 1. **Gateway** — start Hermes desktop (it spawns the multiplex gateway that serves
    every profile, incl. `lars2`). CLI check: `hermes -p default gateway status`.
-2. **TTS** — `uvx pocket-tts serve` (keep detached).
-3. **STT** — `cd voice2 && start.bat` (STT detached on `:8107`).
-4. **Plugin** — click **Lars** in the sidebar; mic button arms voice.
+2. **Voice sidecars** — `cd voice2 && start.bat` (starts Pocket TTS `:8000` reused-if-up + STT `:8107`, both detached). Stop with `stop.bat`.
+3. **Plugin** — click **Lars** in the sidebar; mic button arms voice.
 
 Port map: `:9119` Hermes backend/dashboard (up from core start; hosts the plugin REST
 door) · `:8642` API-server surface (external OpenAI-compatible automation; not the voice
@@ -93,7 +92,7 @@ lars-hermes-theme/
 ├── specs/                   # layout spec
 ├── themes/                  # desktop themes (hinokami-night, lars-yakuza)
 └── voice2/                  # Beta 2.0 voice module — see voice2/README.md
-    ├── stt_local.py  start.bat  .env
+    ├── stt_local.py  start.bat  stop.bat  .env
     └── logs/                # runtime logs (gitignored)
 ```
 
@@ -102,9 +101,9 @@ lars-hermes-theme/
 | Symptom | Fix |
 |---|---|
 | Plugin fails to load | `node --check plugin.js`; reload via ⌘K → Reload desktop plugins |
-| `stt: network` / no transcripts | STT server down → `curl :8107/health`; restart via `start.bat` |
+| `stt: network` / no transcripts | STT server down → `curl :8107/health`; restart via `stop.bat` + `start.bat` |
 | Transcript shows your text twice | stale build — reload plugins (fixed in Beta 2.0) |
-| Barge-in never fires | turn **arm** on before Lars speaks; if still silent, check mic level vs `BARGE_RMS` in `plugin.js` CFG |
+| STT mishears / empty on real speech | read `voice2/logs/stt-local.log`; switch first choice to whisper: `STT_ENGINE=whisper` in `voice2/.env`, then `stop.bat`+`start.bat` |
 | TTS `Failed to fetch` | Pocket TTS not running → `uvx pocket-tts serve` |
 | Typed path dead | gateway down → `hermes -p default gateway restart` |
 
