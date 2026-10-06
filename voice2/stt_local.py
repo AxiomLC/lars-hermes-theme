@@ -1,15 +1,15 @@
 # stt_local.py — tiny local STT endpoint for the Lars voice module.
 # Single job: accept a WAV upload, transcribe it with faster-whisper (CPU,
 # model 'base'), return JSON text.
-# Flask dev server (no dependency on the gateway). Optional bearer token via
-# LARS_VOICE_TOKEN. Voice-loop diagnostics go to Hermes' voice-events.log via
-# the gateway-mounted plugin_api (/voice-log), NOT here.
+# Flask dev server (no dependency on the gateway). Binds 127.0.0.1 only —
+# intentionally NO auth token (loopback-only, nothing to protect).
+# Voice-loop diagnostics go to Hermes' voice-events.log via the gateway-mounted
+# plugin_api (/voice-log), NOT here.
 #
 # Tweaks (env):
 #   STT_MODEL   = faster-whisper model name (default: base)   # base <- tiny/small swappable
 #   STT_DEVICE  = cpu (default) | auto (cuda if present)
 #   STT_COMPUTE = int8 on cpu, auto otherwise
-#   LARS_VOICE_TOKEN = if set, requests must carry `Authorization: Bearer <token>`
 #   STT_PORT    = default 8107
 import io
 import os
@@ -63,13 +63,8 @@ def appendLog(text):
     except Exception:
         pass
 
-# ---- bearer token gate (same token as voice2 .env) ----
-TOKEN = os.environ.get("LARS_VOICE_TOKEN", "")
-
 def authorized():
-    if not TOKEN:
-        return True
-    return request.headers.get("Authorization", "") == f"Bearer {TOKEN}"
+    return True  # loopback-only bind; token auth removed (belt-and-suspenders relic)
 
 @app.after_request
 def _no_cache(resp):

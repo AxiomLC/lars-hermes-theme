@@ -99,7 +99,7 @@ const JV = {
 // typed/log/state ('deaf'|'hot'|'user'|'lars').
 const PROFILE = 'lars2'
 const TTS_URL = 'http://127.0.0.1:8000/tts'
-const TTS_VOICE = 'alba'
+const TTS_VOICE = 'jean'
 // Fire-and-forget diagnostic mirror — everything the transcript sees also lands
 // in Hermes' own plugins/lars/voice-events.log via the gateway-mounted
 // plugin_api backend (POST /voice-log, capped at the last 100 entries).
@@ -123,7 +123,6 @@ const CFG = {
   FIRST_SENTENCE_MIN: 8, SENTENCE_MIN: 24, FIRST_CLAUSE_MIN: 40,
   // ---- STT fallback tuning (voice2/stt_local.py, faster-whisper 'base') ----
   STT_URL: 'http://127.0.0.1:8107/transcribe',
-  STT_TOKEN: 'beta-lars-voice-1',   // = LARS_VOICE_TOKEN in stt_local's env
   STT_ON_LEVEL: 0.030,     // mic peak amplitude above this = user speaking (mic sensitivity; raise if false-positives)
   SILENCE_MS: 2000,        // ← user-speech end timeout: silence this long commits the utterance (was 2000; tweak here)
   STT_MIN_AUDIO_MS: 400,   // shorter than this is noise, discard
@@ -450,7 +449,7 @@ function createVoiceLink(stateAtom, onText) {
         v.setUint32(24, 16000, true); v.setUint32(28, 16000 * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true)
         str(36, 'data'); v.setUint32(40, pcm.length * 2, true)
         for (let i = 0; i < pcm.length; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true)
-        const resp = await fetch(CFG.STT_URL, { method: 'POST', signal: myGenAbort(), headers: { Authorization: `Bearer ${CFG.STT_TOKEN}`, 'Content-Type': 'audio/wav' }, body: wav })
+        const resp = await fetch(CFG.STT_URL, { method: 'POST', signal: myGenAbort(), headers: { 'Content-Type': 'audio/wav' }, body: wav })
         if (!resp.ok) throw new Error('stt http ' + resp.status)
         const j = await resp.json()
         const text = (j.text || '').trim()
