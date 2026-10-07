@@ -156,6 +156,19 @@ def transcribe():
         appendLog(f"{__import__('datetime').datetime.now().isoformat()} [err] transcribe: {e}\n")
         return jsonify(error=f"transcribe failed: {e}"), 500
     ms = int((time.time() - t0) * 1000)
+    if not text:
+        # Debug forensics: save the empty-result WAV + log its true peak so we
+        # can tell 'too quiet to read' from 'content/capture problem'.
+        try:
+            with open(os.path.join(os.path.dirname(LOG_FILE), "empty_last.wav"), "wb") as f:
+                f.write(data)
+        except Exception:
+            pass
+        try:
+            peakmax = float(np.max(np.abs(arr))) if arr.size else 0.0
+        except Exception:
+            peakmax = -1.0
+        appendLog(f"{__import__('datetime').datetime.now().isoformat()} [dbg] empty capture saved empty_last.wav peak={peakmax:.3f}\n")
     appendLog(f"{__import__('datetime').datetime.now().isoformat()} [ok] {used} {ms}ms audio={frames/rate:.2f}s len={len(text)} text={text[:120]}\n")
     return jsonify(text=text, language=lang)
 

@@ -318,6 +318,7 @@ function createVoiceLink(stateAtom, onText) {
     const myGen = L.gen
     L.turnActive = true
     L.llmActive = true
+    L.deltaLoggedTurn = false
     say('user', userText)
     L.setState('user')
     // NOTE: mic/VAD stays live through the turn — it powers barge-in while
@@ -349,15 +350,25 @@ function createVoiceLink(stateAtom, onText) {
   // gateway event handlers (registered via ctx.onEvent at plugin register)
   L.handleGatewayEvent = ev => {
     const sid = ev.session_id || ev.payload?.session_id || ''
-    if (L.liveId && sid && sid !== L.liveId) return   // not our session's turn
     const payload = ev.payload || ev
     const type = ev.type || ev.method || ''
+    // TEMP debug: first delta/complete per turn + orphans, into voice-events.log
+    if (type === 'message.delta' || type === 'message.interim' || type === 'message.complete') {
+      if (L.liveId && sid && sid !== L.liveId) {
+        if (type === 'message.complete') diag('voice.sys', 'evt other-session sid=' + sid.slice(-8))
+        return
+      }
+      if (type === 'message.complete' && !L.pendingTurn) diag('voice.sys', 'complete but no pendingTurn')
+      if ((type === 'message.delta' || type === 'message.interim') && !L.pendingTurn) diag('voice.sys', type + ' but no pendingTurn')
+    }
+    if (L.liveId && sid && sid !== L.liveId) return   // not our session's turn
     if (type === 'message.delta' || type === 'message.interim') {
       const t = (payload && (payload.text || payload.delta)) || ''
       if (!t || !L.pendingTurn) return
       if (payload.already_streamed && type === 'message.interim') return
       const { chunker, myGen } = L.pendingTurn
       if (myGen !== L.gen) return
+      if (!L.deltaLoggedTurn) { L.deltaLoggedTurn = true; diag('voice.sys', 'delta ok') }
       firstDeltaSeen = true
       fullBuf += t
       chunker.push(t)
@@ -463,8 +474,11 @@ function createVoiceLink(stateAtom, onText) {
       an.getFloatTimeDomainData(L.vadBuf)
       let peak = 0
       for (let i = 0; i < L.vadBuf.length; i++) { const a = L.vadBuf[i] < 0 ? -L.vadBuf[i] : L.vadBuf[i]; if (a > peak) peak = a }
+      // Live mic level for the orb react-o-meter (0..~1 after normalize)
+      L.level = Math.min(1, peak * 6)
       if (L.llmActive || L.srcs.length) {
         // barge-in channel: sustained energetic speech while Lars is talking
+        L.levelWho = 'lars'
         L.roll = []
         if (peak > CFG.BARGE_RMS) {
           L.bargeRun++
@@ -472,6 +486,7 @@ function createVoiceLink(stateAtom, onText) {
         } else L.bargeRun = 0
       } else {
         // hot-mic capture: ring buffer + utterance recording + SILENCE_MS commit
+        L.levelWho = L.capSpeech ? 'user' : ''
         L.roll.push(new Float32Array(L.vadBuf)); if (L.roll.length > 14) L.roll.shift()
         if (peak > CFG.STT_ON_LEVEL && !L.capSpeech) {
           L.capSpeech = true; L.silMs = 0
@@ -603,12 +618,50 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
 
   const pos = useValue(posAtom)
   const panel = useValue(panelAtom)
-  // Voice state: 'deaf' (off — only "Hey Lars" wakes) | 'hot' (hot mic) |
-  // 'user' (mic hears the user → green glow) | 'lars' (Lars speaking →
-  // dark-purple glow). The voice service sets this once wired; TALK toggles
-  // deaf↔hot for now.
+  // Voice state: 'deaf' | 'hot' | 'user' (mic hears user → green) | 'lars' (speaking → violet).
   const vstate = useValue(stateAtom)
   const hot = vstate === 'hot' || vstate === 'user' || vstate === 'lars'
+
+  // Audio-reactive orb: a 60 ms interval (started once) reads the engine's
+  // live mic level (voiceLink.level / .levelWho, set in the VAD poll) and
+  // drives the two state halos + core pulse directly on DOM ids — no React
+  // re-renders. Idle: both halos off, core hollow and static.
+  if (!window._ljPulseIv || window._ljPulseVoice !== voiceLink) {
+    if (window._ljPulseIv) window.clearInterval(window._ljPulseIv)
+    window._ljPulseVoice = voiceLink
+    window._ljPulseIv = setInterval(() => {
+      try {
+        const vg = document.getElementById('ljHaloU')
+        const vv = document.getElementById('ljHaloL')
+        const core = document.getElementById('ljCore')
+        if (!vg || !vv || !core) return
+        const who = (voiceLink && voiceLink.levelWho) || ''
+        const lvl = Math.min(1, (voiceLink && voiceLink.level) || 0)
+        const setScale = s => core.setAttribute('transform', `translate(24 24) scale(${s}) translate(-24 -24)`)
+        if (!voiceLink || !voiceLink.listening) {
+          vg.setAttribute('opacity', '0')
+          vv.setAttribute('opacity', '0')
+          setScale(1)
+          return
+        }
+        if (who === 'lars') {
+          // Lars voice isn't in the mic analyser — synthetic speaking pulse
+          const p = (Math.sin(performance.now() / 220) + 1) / 2
+          vg.setAttribute('opacity', '0')
+          vv.setAttribute('opacity', String(0.15 + 0.75 * p))
+          setScale(1 + 0.3 * p)
+        } else {
+          if (who === 'user' && lvl > 0) {
+            vg.setAttribute('opacity', String(0.25 + 0.7 * lvl))
+          } else {
+            vg.setAttribute('opacity', '0')
+          }
+          vv.setAttribute('opacity', '0')
+          setScale(who === 'user' ? 1 + 0.3 * lvl : 1)
+        }
+      } catch (e) { /* orb not mounted this render */ }
+    }, 60)
+  }
 
   // Glow per state (2026-09-27): user talking → green, Lars talking → dark
   // purple, off/hot-listening → plain (the green tint lives on the mic icon).
@@ -660,7 +713,13 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
   // transcriptAtom is a version counter; entries live on voiceLink.log.
   useValue(transcriptAtom)
   const entries = (voiceLink && voiceLink.log) || []
+  // Auto-scroll transcript to newest (bottom) on every render bump and on open.
+  setTimeout(() => {
+    const el = document.getElementById('ljTranscript')
+    if (el) el.scrollTop = el.scrollHeight
+  }, 0)
   const transcript = jsxs('div', {
+    id: 'ljTranscript',
     style: {
       flex: 1,
       width: '100%',
@@ -675,7 +734,7 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
     children: (entries || []).length
       ? entries.map((e, i) => jsxs('div', {
           key: i,
-          style: { marginBottom: '4px', color: e.role === 'user' ? JV.green : e.role === 'err' ? JV.amber : JV.ink },
+          style: { marginBottom: '4px', color: e.role === 'user' ? 'rgba(64,200,255,1)' : e.role === 'err' ? JV.amber : JV.ink },
           children: [
             jsx('span', { style: { color: JV.dim, marginRight: '4px' },
               children: e.role === 'user' ? 'you:' : e.role === 'err' ? 'err:' : 'lars:' }),
@@ -712,12 +771,12 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
     style: {
       position: 'fixed',
       ...(pos ? { left: pos.x + 'px', top: pos.y + 'px' } : { right: '14px', bottom: '14px' }),
-      width: panel ? '25vw' : '112px',
-      height: panel ? '55vh' : '150px',
+      width: panel ? '25vw' : '132px',
+      height: panel ? '82vh' : '196px',
       background: 'transparent',
       border: 'none',
-      borderRadius: '12px',
-            boxShadow: glow,
+      borderRadius: '22px',
+      boxShadow: 'none',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
@@ -727,36 +786,111 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
     },
     children: [
       jsx('style', { children: micCSS }),
-      // Reactor: two counter-rotating dashed rings around a dark core. DRAG HANDLE.
-      jsxs('div', { ...orbDrag, children: [
+      // Reactor (donor-style, Itsme23476): faint base ring, dashed counter-
+      // rotating rings, 3 comet arcs (cyan/amber/violet), tick dial, glowing
+      // core. DRAG HANDLE. State glow rides on the orb, not the box.
+      jsxs('div', { ...orbDrag, style: { ...orbDrag.style, position: 'relative', display: 'inline-flex' }, children: [
         jsxs('svg', {
-          width: '69',
-          height: '69',
-          viewBox: '0 0 44 44',
+          width: '104',
+          height: '104',
+          viewBox: '0 0 48 48',
+          style: { filter: glow },
           children: [
+            jsx('defs', {
+              children: [
+                jsx('radialGradient', {
+                  id: 'ljCoreGg',
+                  children: [
+                    jsx('stop', { offset: '0%', stopColor: JV.green, stopOpacity: '0.5' }),
+                    jsx('stop', { offset: '100%', stopColor: JV.green, stopOpacity: '0' })
+                  ]
+                }),
+                jsx('radialGradient', {
+                  id: 'ljCoreGv',
+                  children: [
+                    jsx('stop', { offset: '0%', stopColor: JV.violet, stopOpacity: '0.55' }),
+                    jsx('stop', { offset: '100%', stopColor: JV.violet, stopOpacity: '0' })
+                  ]
+                })
+              ]
+            }),
+            // 24-tick outer dial (major every 3rd, brighter)
+            jsx('g', {
+              children: Array.from({ length: 24 }, (_, i) =>
+                jsx('line', {
+                  x1: (24 + Math.cos((i / 24) * Math.PI * 2) * 23.0).toFixed(2),
+                  y1: (24 + Math.sin((i / 24) * Math.PI * 2) * 23.0).toFixed(2),
+                  x2: (24 + Math.cos((i / 24) * Math.PI * 2) * 24.0).toFixed(2),
+                  y2: (24 + Math.sin((i / 24) * Math.PI * 2) * 24.0).toFixed(2),
+                  stroke: i % 3 === 0 ? '#8b1f2b' : JV.cyan,
+                  strokeOpacity: i % 3 === 0 ? '0.75' : '0.25',
+                  strokeWidth: '1'
+                }, 't' + i))
+            }),
+            // faint solid base ring (outermost; gap to compass ticks ~2.4)
             jsx('circle', {
-              cx: '22', cy: '22', r: '15',
-              fill: 'none', stroke: JV.cyan, strokeWidth: '1.2',
-              strokeDasharray: '2 4',
-              style: { transformOrigin: '22px 22px', animation: 'ljSpin 12s linear infinite' }
+              cx: '24', cy: '24', r: '20.6',
+              fill: 'none', stroke: JV.cyan, strokeOpacity: '0.14', strokeWidth: '1.4'
+            }),
+            // dashed slow rings (counter-rotating)
+            jsx('circle', {
+              cx: '24', cy: '24', r: '19',
+              fill: 'none', stroke: JV.cyan, strokeOpacity: '0.35', strokeWidth: '0.7',
+              strokeDasharray: '2 10',
+              style: { transformOrigin: '24px 24px', animation: 'ljSpin 42s linear infinite' }
             }),
             jsx('circle', {
-              cx: '22', cy: '22', r: '11',
-              fill: 'none', stroke: JV.amber, strokeWidth: '1',
-              strokeDasharray: '1.4 3.4',
-              style: { transformOrigin: '22px 22px', animation: 'ljReverse 8.8s linear infinite' }
+              cx: '24', cy: '24', r: '15',
+              fill: 'none', stroke: JV.cyan, strokeOpacity: '0.3', strokeWidth: '0.6',
+              strokeDasharray: '1 8',
+              style: { transformOrigin: '24px 24px', animation: 'ljReverse 30s linear infinite' }
             }),
-            // Delete the thin light-purple border ring (2026-09-27): core is a single
-                        // solid dark purple/black disc.
-                        jsx('circle', {
-                          cx: '22', cy: '22', r: '6.4',
-                          fill: '#160a24',
-                          style: { transformOrigin: '22px 22px', animation: 'ljOrbPulse 2.6s ease-in-out infinite' }
-                        })
+            // comet arcs — 3 lengths/thicknesses, bright cyan/teal (Utility-text color)
+            // biggest comet arc — heavily ghosted (70% quieter than before)
+            jsx('circle', {
+              cx: '24', cy: '24', r: '21',
+              fill: 'none', stroke: 'rgba(64,200,255,0.37)', strokeWidth: '1.6',
+              strokeLinecap: 'round', strokeDasharray: '14 118',
+              style: { transformOrigin: '24px 24px', animation: 'ljSpin 12s linear infinite' }
+            }),
+            jsx('circle', {
+              cx: '24', cy: '24', r: '18',
+              fill: 'none', stroke: 'rgba(64,200,255,0.42)', strokeWidth: '1.1',
+              strokeLinecap: 'round', strokeDasharray: '8 105',
+              style: { transformOrigin: '24px 24px', animation: 'ljReverse 8s linear infinite' }
+            }),
+            jsx('circle', {
+              cx: '24', cy: '24', r: '16',
+              fill: 'none', stroke: 'rgba(64,200,255,0.45)', strokeWidth: '0.8',
+              strokeLinecap: 'round', strokeDasharray: '6 95',
+              style: { transformOrigin: '24px 24px', animation: 'ljSpin 17s linear infinite' }
+            }),
+            // state halos: green (user) / violet (Lars) — start AT the core ring
+            // (r≈5.5) and fade out to the first orbiting dot-ring (r=15).
+            // Opacity 0 idle — driven live by the pulse loop below.
+            jsx('circle', { id: 'ljHaloU', cx: '24', cy: '24', r: '15', fill: 'url(#ljCoreGg)', opacity: '0' }),
+            jsx('circle', { id: 'ljHaloL', cx: '24', cy: '24', r: '15', fill: 'url(#ljCoreGv)', opacity: '0' }),
+            // hollow core ring (no solid disc, no idle pulse)
+            jsx('circle', { id: 'ljCore', cx: '24', cy: '24', r: '5.4',
+              fill: 'none', stroke: JV.cyan, strokeOpacity: '0.25', strokeWidth: '0.45' })
           ]
+        }),
+        jsx('div', {
+          style: {
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            fontSize: '13px',
+            fontWeight: '700',
+            letterSpacing: '0.14em',
+            color: 'rgba(232,251,255,0.29)',
+            textShadow: 'none',
+            pointerEvents: 'none'
+          },
+          children: 'L.A.R.S'
         })
       ] }),
-      jsx('div', { style: { fontSize: '10px', color: JV.ink, textShadow: `0 0 6px ${JV.cyan}` }, children: 'Lars' }),
       // Mic + keyboard icon buttons (borderless, row).
       jsxs('div', {
         style: { display: 'flex', gap: '10px', marginTop: '2px', alignItems: 'center' },
@@ -807,30 +941,7 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
             style: { display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', flex: 1, marginTop: '6px', minHeight: 0 },
             children: [transcript, typeBox]
           })
-        : null,
-      // CORE button sits beneath, in Hermes branding font (system-ui until we
-      // pin the exact brand face).
-      jsx('button', {
-        type: 'button',
-        title: 'Hermes — open Lars session in the native Hermes desktop chat (state persists)',
-        onClick: () => {
-          const sess = host.state.focusedStoredSessionId ? host.state.focusedStoredSessionId.get() : null
-          if (sess) host.openSession(sess)
-          else host.navigate('/')
-        },
-        style: {
-                  background: 'transparent',
-                  border: 'none',
-                  borderRadius: '3px',
-                  color: JV.ink,
-                  fontSize: '10px',
-                  textShadow: `0 0 6px ${JV.cyan}`,
-                  cursor: 'pointer',
-                  padding: '2px 6px',
-                  marginTop: '4px'
-                },
-                children: 'Hermes'
-      })
+        : null
     ]
   })
 }

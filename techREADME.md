@@ -63,7 +63,7 @@ Config-split rule (how the Hermes UI writes it too): **config.yaml = behavior/mo
 - `diag(src,msg)` — fire-and-forget `pluginCtx.rest('/voice-log', {method:'POST', body:{src,level,msg}})` → appends one JSON line to `~\AppData\Local\hermes\plugins\lars\voice-events.log`, **hard-capped at the last 100 entries** (the cap IS the pruning). Agents read the file directly; external debug via `GET /api/plugins/lars/voice-log` (needs the dashboard session token only for curl use — the plugin itself needs no token).
 - Voice engine (`createVoiceLink`): mic → RMS VAD (~21 ms polls) → capture → 16-bit WAV → POST `:8107/transcribe` → `submitTurn` (RPC) → `message.delta` → sentence chunker → Pocket TTS streamed WAV via Web Audio → barge-in (energy threshold + `session.interrupt`) / re-arm button.
 - `makeChunker` / `cleanForSpeech` — streaming sentence cuts + speech-safe text.
-- `JarvisMic` — floating reactor, state glow (`deaf|hot|user|lars`), re-arm.
+- `JarvisMic` — floating reactor orb (full spec: styleREADME §Reactor): donor-style inline SVG — 3 comet arcs (r=21 @0.37 ghosted / r=18 @0.42 / r=16 @0.45, Utility cyan-teal) + solid base ring r=20.6 + 24-tick compass dial (every 3rd tick dark-red `#8b1f2b`) + dashed slow rings + **hollow** core ring (no solid disc, no idle pulse). **Audio-reactive:** the VAD poll in `createVoiceLink` writes `L.level` (normalized mic RMS) + `L.levelWho` (`'user'` capturing / `'lars'` streaming / `''` idle) every ~21 ms; a 60 ms `setInterval` in `JarvisMic` (versioned — `window._ljPulseVoice !== voiceLink` restarts it) drives green/violet halos (r=15, fading to the first dot-ring) and the core pulse (scale 1→1.3, `translate(24 24) scale(s) translate(-24 -24)` — SVG transform-origin math) straight on DOM ids `ljHaloU`/`ljHaloL`/`ljCore`, no React re-renders. Voice box: fully transparent, no border/blur/shadow, panel `82vh`, transcript auto-scrolls to newest (`ljTranscript`), user text in bright Utility cyan. Symptom if the interval guard regresses: orb animates but never pulses with audio after a plugin reload.
 - `LarsPage` — 7 Div pages, staggered expandables, ctx.storage persistence.
 - `register()` — ONE voice-link instance (survives nav), event wiring, sidebar + ⌘K.
 
@@ -73,8 +73,8 @@ Config-split rule (how the Hermes UI writes it too): **config.yaml = behavior/mo
 2. Typed path: type → reply streams with TTS.
 3. Voice path: arm → speak → user text once → streamed spoken reply.
 4. Barge-in: arm, let a long answer start, say "stop" loudly → `barge-in` event + `session.interrupt`.
-5. STT `len=0`: read `voice2/logs/stt-local.log` (per-request ms/audio-seconds/text, 300 KB tail prune). Our energy-VAD is authoritative — whisper's own Silero VAD is OFF (mic-array channel quirk rejected whole utterances).
-6. Voice events: read `~\AppData\Local\hermes\plugins\lars\voice-events.log` (last 100 JSON lines).
+5. STT `len=0`: read `voice2/logs/stt-local.log` (per-request engine/ms/audio-seconds/text, 300 KB tail prune) — since Oct 2026 an empty result also saves `voice2/logs/empty_last.wav` + logs its true peak `[dbg]` line (tells 'too quiet' from 'capture/content problem'). Our energy-VAD is authoritative — whisper's own Silero VAD is OFF (mic-array channel quirk rejected whole utterances).
+6. Voice events: read `~\AppData\Local\hermes\plugins\lars\voice-events.log` (last 100 JSON lines). Per-turn trace lines from the gateway-event handler (`delta ok`, `complete but no pendingTurn`, `evt other-session sid=…`) are TEMP debug — remove once stable.
 7. Gateway: `hermes -p default gateway status`; errors: `hermes logs errors`.
 8. Prompt size: `hermes -p lars2 "…" --usage-file out.json`.
 
