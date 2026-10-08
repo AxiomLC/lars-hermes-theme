@@ -835,23 +835,23 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
               strokeDasharray: '1 8',
               style: { transformOrigin: '24px 24px', animation: 'ljReverse 30s linear infinite' }
             }),
-            // comet arcs — 3 lengths/thicknesses, bright cyan/teal (Utility-text color)
+            // comet arcs — 3 lengths/thicknesses, dim amber (JV.amber #ffb648)
             // biggest arc ghosted
             jsx('circle', {
               cx: '24', cy: '24', r: '21',
-              fill: 'none', stroke: 'rgba(64,200,255,0.37)', strokeWidth: '1.6',
+              fill: 'none', stroke: 'rgba(64,243,255,0.15)', strokeWidth: '1.6',
               strokeLinecap: 'round', strokeDasharray: '14 118',
               style: { transformOrigin: '24px 24px', animation: 'ljSpin 12s linear infinite' }
             }),
             jsx('circle', {
               cx: '24', cy: '24', r: '18',
-              fill: 'none', stroke: 'rgba(64,200,255,0.42)', strokeWidth: '1.1',
+              fill: 'none', stroke: 'rgba(255,182,72,0.10)', strokeWidth: '1.1',
               strokeLinecap: 'round', strokeDasharray: '8 105',
               style: { transformOrigin: '24px 24px', animation: 'ljReverse 8s linear infinite' }
             }),
             jsx('circle', {
               cx: '24', cy: '24', r: '16',
-              fill: 'none', stroke: 'rgba(64,200,255,0.45)', strokeWidth: '0.8',
+              fill: 'none', stroke: 'rgba(255,182,72,0.1)', strokeWidth: '0.8',
               strokeLinecap: 'round', strokeDasharray: '6 95',
               style: { transformOrigin: '24px 24px', animation: 'ljSpin 17s linear infinite' }
             }),
