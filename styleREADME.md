@@ -10,26 +10,26 @@ Secondary reference (not adopted): [eadmin2/jarvis_ai](https://github.com/eadmin
 
 ## Palette already in the codebase
 
-`const JV` at the top of `plugin.js` (~line 71) — lifted from the donor repo and used as inline-style values throughout:
+`const LARS_STYLE` at the top of `plugin.js` (~line 71) — lifted from the donor repo and used as inline-style values throughout:
 
 | Token | Value | Use |
 |---|---|---|
-| `JV.bg` | `#02070c` | deep navy background |
-| `JV.bg2` | `#061722` | secondary background |
-| `JV.panel` | `rgba(5,18,28,.64)` | translucent panel fill |
-| `JV.edge` | `rgba(57,232,255,.24)` | hairline cyan border |
-| `JV.edge2` | `rgba(57,232,255,.55)` | bright border (hover/active) |
-| `JV.cyan` | `#40f3ff` | primary accent |
-| `JV.cyan2` | `#16b8d4` | dim accent |
-| `JV.ink` | `#e8fbff` | main text |
-| `JV.mut` | `#83b7c4` | secondary text |
-| `JV.dim` | `#47717f` | faint labels |
-| `JV.amber` | `#ffb648` | warnings/highlight (our accent bloodline) |
-| `JV.red` | `#ff5d6c` | errors |
-| `JV.green` | `#39f5a6` | ok/user-mic |
-| `JV.violet` | `#a884ff` | Lars-speaking glow |
-| `JV.disp` | `"Chakra Petch"` | display font (Google Fonts) |
-| `JV.mono` | `"JetBrains Mono"` | labels/mono (Google Fonts) |
+| `LARS_STYLE.bg` | `#02070c` | deep navy background |
+| `LARS_STYLE.bg2` | `#061722` | secondary background |
+| `LARS_STYLE.panel` | `rgba(5,18,28,.64)` | translucent panel fill |
+| `LARS_STYLE.edge` | `rgba(57,232,255,.24)` | hairline cyan border |
+| `LARS_STYLE.edge2` | `rgba(57,232,255,.55)` | bright border (hover/active) |
+| `LARS_STYLE.cyan` | `#40f3ff` | primary accent | the blue glow around boxes in a page.
+| `LARS_STYLE.cyan2` | `#16b8d4` | dim accent |
+| `LARS_STYLE.ink` | `#e8fbff` | main text |
+| `LARS_STYLE.mut` | `#83b7c4` | secondary text |
+| `LARS_STYLE.dim` | `#47717f` | faint labels |
+| `LARS_STYLE.amber` | `#ffb648` | warnings/highlight (our accent bloodline) |
+| `LARS_STYLE.red` | `#ff5d6c` | errors |
+| `LARS_STYLE.green` | `#39f5a6` | ok/user-mic |
+| `LARS_STYLE.violet` | `#a884ff` | Lars-speaking glow |
+| `LARS_STYLE.disp` | `"Chakra Petch"` | display font (Google Fonts) |
+| `LARS_STYLE.mono` | `"JetBrains Mono"` | labels/mono (Google Fonts) |
 
 ## Design DNA to keep copying
 
@@ -37,15 +37,15 @@ Secondary reference (not adopted): [eadmin2/jarvis_ai](https://github.com/eadmin
 - **Type**: Chakra Petch for display, JetBrains Mono for small-caps labels with big letter-spacing (`.2em`+), small font sizes (9–13px).
 - **Ambiance** (optional, cheap): faint 54px blueprint grid + slow drifting scanline band + blurred ambient blobs (see donor `.grid-bg`, `.scan`, `.a1/.a2`).
 - **Reactor orb**: center orb + concentric dashed rings + 2–3 colored comet arcs (cyan/amber/violet) counter-rotating SVG/canvas, big letter-spaced state word in the middle. State colors: standby cyan, listening green, Lars-speaking violet, error red.
-- **History**: the Utility Strip (`plugins/lars/dashboard/dist/index.js`) already borrowed only the hairline borders (`rgba(64,200,255,…)`) — future work should bring it fully onto `JV`.
+- **History**: the Utility Strip (`plugins/lars/dashboard/dist/index.js`) already borrowed only the hairline borders (`rgba(64,200,255,…)`) — future work should bring it fully onto `LARS_STYLE`.
 
 ## How styling lives in plugin.js (single file)
 
 All styling is inside `plugin.js` — that's our standard and it stays:
 
-1. **`JV` token object** (top of file) — the single palette/font source. NEW COLORS GO HERE ONLY. Reference as `JV.edge`, `JV.cyan`, etc.
+1. **`LARS_STYLE` token object** (top of file) — the single palette/font source. NEW COLORS GO HERE ONLY. Reference as `LARS_STYLE.edge`, `LARS_STYLE.cyan`, etc.
 2. **Inline `style:` objects** on `jsx()` elements — the plugin sandbox loads via Blob URL so separate `.css` files don't resolve.
-3. **Injected `<style>` blocks** (`micCSS` in `JarvisMic`, plus page-level ones) — used only for what inline styles can't do: `@keyframes` animations (ljSpin / ljReverse / ljOrbPulse hues). Keep token colors interpolated from `JV` into these template strings.
+3. **Injected `<style>` blocks** (`micCSS` in `JarvisMic`, plus page-level ones) — used only for what inline styles can't do: `@keyframes` animations (ljSpin / ljReverse / ljOrbPulse hues). Keep token colors interpolated from `LARS_STYLE` into these template strings.
 
 No external CSS-in-JS library, no separate stylesheet files, no `window.require`. If styling ever feels too big for one file, the sanctioned expansion is *more token entries + a larger injected `<style>` string* — still inside `plugin.js`.
 
@@ -78,13 +78,13 @@ The voice module (`JarvisMic` in `plugin.js`) renders a donor-style reactor orb
   absolutely centered in the orb, pointerEvents none.
 - **Voice box**: no border, no backdrop blur, no shadow — fully transparent in
   both collapsed and TYPE modes (the inner transcript/type boxes keep hairline
-  `JV.edge` edges for readability). Panel = `82vh` tall, auto-scrolls to the
+  `LARS_STYLE.edge` edges for readability). Panel = `82vh` tall, auto-scrolls to the
   newest entry on every transcript bump (id `ljTranscript`). User speech text
   in the transcript renders in Utility-cyan `rgba(64,200,255,1)`.
 
 ## Tuning knobs (orb + voice panel)
 
-All in `plugin.js`, `JarvisMic` / `CFG`:
+All in `plugin.js`, `JarvisMic` / `VOICE_KNOBS`:
 
 | Knob | Where | Default | Effect |
 |---|---|---|---|
@@ -97,6 +97,6 @@ All in `plugin.js`, `JarvisMic` / `CFG`:
 
 ## Rules for future edits
 
-- Colors/fonts/spacings: only via `JV` (or a `THEME` block next to it if it grows). No new hard-coded hex values in components.
+- Colors/fonts/spacings: only via `LARS_STYLE` (or a `THEME` block next to it if it grows). No new hard-coded hex values in components.
 - Visuals are frozen (user-locked): matching the donor is incremental — never break JarvisMic layout, Div pages, or buttons.
 - Fonts load from Google Fonts (`@import` or `<link>` preserved in injected style); plugin is Electron-hosted so remote fonts are fine.

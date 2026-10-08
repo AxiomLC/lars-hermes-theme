@@ -58,7 +58,7 @@ Config-split rule (how the Hermes UI writes it too): **config.yaml = behavior/mo
 
 ## 4. plugin.js map (~1135 lines)
 
-- `CFG` — every tuning knob in one block (see voice2/README for the table): `SILENCE_MS` (2 s speech-end timeout), `STT_*` levels, `BARGE_*` thresholds, sentence-length mins.
+- `VOICE_KNOBS` — every tuning knob in one block (see voice2/README for the table): `SILENCE_MS` (2 s speech-end timeout), `STT_*` levels, `BARGE_*` thresholds, sentence-length mins.
 - `PROFILE = 'lars2'`, `TTS_URL = :8000/tts`, `TTS_VOICE = 'jean'` (single constants).
 - `diag(src,msg)` — fire-and-forget `pluginCtx.rest('/voice-log', {method:'POST', body:{src,level,msg}})` → appends one JSON line to `~\AppData\Local\hermes\plugins\lars\voice-events.log`, **hard-capped at the last 100 entries** (the cap IS the pruning). Agents read the file directly; external debug via `GET /api/plugins/lars/voice-log` (needs the dashboard session token only for curl use — the plugin itself needs no token).
 - Voice engine (`createVoiceLink`): mic → RMS VAD (~21 ms polls) → capture → 16-bit WAV → POST `:8107/transcribe` → `submitTurn` (RPC) → `message.delta` → sentence chunker → Pocket TTS streamed WAV via Web Audio → barge-in (energy threshold + `session.interrupt`) / re-arm button.

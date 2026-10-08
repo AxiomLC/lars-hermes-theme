@@ -1,34 +1,15 @@
 /**
  * Lars — Executive Div 7 Master plugin (Hermes desktop app).
  *
- * Div platform: 7 pages under one shell — Exec Div 7 home + 6 Division pages.
- * Div 7 is the template: staggered click-to-expand boxes, a lower-right
- * voice/mic module (graphic only for now).
- *
- * STATES: every page persists its state (collapsed menu, expanded boxes,
- * scroll position) in ctx.storage (namespaced to this plugin). The core
- * sidebar "Lars" row points at /lars which RESOLVES to the last-visited page —
- * clicking Lars in core Hermes returns you to where you were, not to a static
- * home. Leaving via the mic "Expand" (core session chat) and clicking Lars
- * again restores that same state.
- *
- * Door: <home>/desktop-plugins/lars/plugin.js  (folder name == id)
- * Plain ESM, no build step. Only these imports resolve:
- * @hermes/plugin-sdk, react, react/jsx-runtime.
- *
- * Routes are one segment (no "/"): /lars /lars-comms /lars-clients
- * /lars-records /lars-production /lars-debug /lars-crm.
- *
- * NOTE on the logo: disk plugins load via Blob URL, so a sibling logo.png
- * CANNOT be referenced by relative path. The logo below is an inline SVG
- * placeholder; swapping in a real image needs either an HTTPS url, a data:
- * URI, or moving the plugin to a bundled/unified package.
- *
- * NOTE (utilities rail removed 2026-09-24): the UtilitiesRail was stripped from
- * this build pending the resource monitor (see Utility-Monitor.md). The
- * gateway-mounted plugin_api.py backend REMAINS (plugins/lars/dashboard/) —
- * used for titlebar /stats and /voice-log.
- * Voice/mic (JarvisMic) kept as graphic placeholder per plan.
+ * 7 pages under one shell. Plain ESM, no build step; folder name == id.
+ * Door: <home>/desktop-plugins/lars/plugin.js. Only these imports resolve:
+ * @hermes/plugin-sdk, react, react/jsx-runtime (everything else fails —
+ * sandbox, Blob-URL loading, relative files don't resolve).
+ * Routes: /lars /lars-comms /lars-clients /lars-records /lars-production
+ * /lars-debug /lars-crm. State persists per page in ctx.storage; the core
+ * sidebar "Lars" row resolves to the last-visited page.
+ * Gateway-mounted backend: plugins/lars/dashboard/plugin_api.py (/stats +
+ * /voice-log). Voice (JarvisMic) → engine below + voice2/.
  */
 
 import { atom, host, icons, Contribute, TITLEBAR_AREAS, PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, useQuery, useValue } from '@hermes/plugin-sdk'
@@ -37,7 +18,31 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 const ID = 'lars' // must match the folder name
 let pluginCtx = null // set in register(); used by TitlebarUtils for ctx.rest
 
-// ── The 7 Divisions ──────────────────────────────────────────────────────────
+// ═══ 1. STYLE SCHEMA (LARS_STYLE) — palette/fonts lifted from Itsme23476/jarvis-hermes-dashboard ═══
+const LARS_STYLE = {
+  bg: '#02070c',            // near-black deep navy — page/app background
+  bg2: '#061722',           // dark slate blue — raised surfaces
+  panel: 'rgba(5,18,28,.64)', // navy glass 64% — panel fills
+  edge: 'rgba(57,232,255,.24)', // cyan hairline — box borders
+  edge2: 'rgba(57,232,255,.55)', // bright cyan hairline — hover/active borders
+  cyan: '#40f3ff',          // electric cyan — primary accent, glows
+  cyan2: '#16b8d4',         // teal — dim accent
+  ink: '#e8fbff',           // pale ice-white — main text
+  mut: '#83b7c4',           // steel cyan — secondary text (idle menu items)
+  dim: '#47717f',           // dark steel — faint labels (chip keys)
+  amber: '#ffb648',         // warm gold — warnings/accent arcs
+  red: '#ff5d6c',           // coral red — errors
+  green: '#39f5a6',         // mint green — ok/user-mic
+  violet: '#a884ff',        // soft violet — Lars-speaking glow
+  disp: '"Aptos Light","Segoe UI Light",system-ui,sans-serif', // MS default font (Win 11) — headings/sections/menu
+  sans: '"Tahoma",Verdana,sans-serif',            // Windows system sans — normal paragraph text
+  narrow: '"Bahnschrift Light","Bahnschrift",Arial,sans-serif', // condensed — specs / data / param displays
+  mono: '"Consolas","Courier New",monospace'    // mono alias (typebox, code-y inputs)
+}
+// Fonts are Windows built-ins (Consolas/Colonna/Tahoma/Arial Narrow) — no
+// network fetch needed. Cross-OS fallbacks only (Courier New/Verdana/Arial).
+
+// ═══ 2. DIVISIONS + HOME PAGE LAYOUT ═══
 // `edge` = per-Div accent (thin glow on the menu chip).
 const DIVS = [
   { num: '7', label: 'Div 7 Exec', path: '/lars', placeholder: 'Div 7', edge: '#2563eb' }, // dark blue
@@ -49,7 +54,7 @@ const DIVS = [
   { num: '6', label: 'Div 6 CRM', path: '/lars-crm', placeholder: 'Div 6', edge: '#eab308' } // yellow
 ]
 
-// Exec Div 7 home staggered boxes (click to EXPAND, no nav).
+// ═══ 3. EXEC HOME STAGGERED BOXES (click to EXPAND, no nav) ═══
 const HOME_BOXES = [
   { id: 'stats', label: 'Div Stats', w: '220px', h: '110px' },
   { id: 'social', label: 'Social Posts / Comments', w: '180px', h: '90px' },
@@ -60,60 +65,46 @@ const HOME_BOXES = [
   { id: 'browser', label: 'Browser Panel', w: '210px', h: '100px' }
 ]
 
-// Real Lars logo (from main lars-logo.png), downscaled + embedded as data URI.
-// Disk plugins load via Blob URL so relative paths can't resolve — data URI is the way.
-const LOGO_DATA = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEgAAABgCAYAAAC+EjQcAAAxeUlEQVR42u18eXSV1bn3b+93PPOUeSAjEBIIgyAiYEAFpQ6XVoLeKra2WtteO9ha79fe1hBbO9hWe1t7Ha7a2sFq0Cu1aEVFggOIDEKYA5nHk+Sc5IzvOe+w9/fHSUJA6HBv7x/ft3jWylpw1jn73fv3PvsZfs+zN3BBLsgFuSAX5IJckAtyQS7IBbkgF+T/L+GcgHMy/j8y/vffkbN/S/6fxqXhe+/Thu1cnFxN3WrxbNAaOKf1TU1CPedCw/bt4sRfPedCfVOT0MA5HQd3Egxav0EAQAGgifPMd/6fAoZzyqdM+s7fbJH4uAZxzunsb/7I+d8Z97InX1QbOJcBgJAMOFOfWd/UJJxzPg0NtD4DpNiwnYtNnAvjwIr1nAtTtPsvqu4/YCdxsgmg6wmxAODr/eHpHpv6mWQ0ccOht/cNvfrYLw4BWAogIHP24wfeevnxPTuPlge8Nh9RJT+AbFmULN00BJg8zE1zKDocSVJZ6vjtV77kFxX7m6YsMgDblq2rt9deVbcwNz93OzetXzVku/ZMAPWn32zHvltX8o3NEDaugEUI4X9t7ms39Qqb64us/zWAmjgXJoBp7AvNI3bbN7o6uta27tht3//u+0gO9iDLF0DunBoUTiuB3e03lWmF/QAKVLdTtET5jPFkiQCmAQBQYQ4lxlKxoWPHK7pPtSLS04/ejlNQfflYeMUyVNRUIzC7cotKyE8eyPftOHtun93XWzhtmmceEYUqABUAvDypIZYyhodHIjteePDh1xIvPpZs4Jw2EsL+sQBxThoA0kgI+/TrHxSWL6n9VtfJjjtat7wjvbv1jxB106y8aBEtWHgJXIX5zON3UlF0EAAkbmpAKAzEx3gsluQAmMNlEH/KzsdUidi8PsokmRC7DS6fAx6/jwHA2NAQG2rtJ8d2v0uOvP02AyDOuPqfMG/pYsi5Oc8d2Xvs/svml8YceYH1AK6JjMUWxjXLraV0IJEEkUQ4Am6UFGfDLglIakZrW2vPvz2zeOYL9U1Nwqb1661/CEBTB2scjt2qJVM/3PnG2/m7Hn8CAKxLrruB5M6fTZjDSSSHDTZVhtY3iL6uPpC+fm4l09zH06QIidMG2O2ZHL+qvBThadnQdJl3RPp4NMSot6QMRbMroNptADMx2NuPEzuP4sPtb1gA6Iq77yallXlJ6JbR2T3sad9/EPGBAZjhIQaApeIJ6KkUWNqE6nGiYsVScv26a4Rsh4zmDzs+9/zi6f95LpD+boAatm8XG1euNBc+/Hzgqg3X/nvkZNvNzz/wE4x0d5g111wrVF26nIlej6DIItK6if4TxzH0/nvoPdWBLAAVfh+yHRIM04AkSmeMrdrsAABRliBIEvLcIvzlNQCA5976AC3xOC5aswplc2aDqCosUYaWNiAYacQNZgWPdwpSWRFk0zQTPYNEcEg04LITWZCgW5ltS0bHsP/ddxDv6ICvZq614d7PES8l+pYDXXN2XDX31NnbjfydXkpsJMS8a1fLouzKst9s++PrVe/99Kdm4fRZwuzP3sJcLr8Ahx1E1/v6du7JOv7OW8rIzmZud3nIJRctglcBjLQJAJAU8QyAJsBRaOYzazwwmACq+opr0bxtO55o2gy1uhZ1n/s88svyEDM4WNrA8PAouKZxUZJgiSKhogRmGkj0DAIAsrzuyWflFXjR8vZutL72RxSs+bh5992fFA+f6nn4l9VlX5tY498N0MQP/0/X8BrTtJ7/8y8fd7X+6WVz5rr1woxVaxiRVcHJjbjPY3u4oCT34X8N5H6cy+JTZSXT2fSyMqqqKlKpFFRVnbRiAJikiHw8tiGSKDHVZhemAjUBliBJuPzjazHY0YFXkwwsUIjewQHkzJwJKkqwKwJsdhtCo3EkhwaRVVyIQI4PnUfbkRyJIBoKwuV0IDu3AFZaQ0FlIbY/txnDJ0+yzz+0kRR4nIe/keudzzlnU70f+XvAuadt8JOWZT7zu699Swz3t1lX/cs9VCkug2KTiN8hvZIrS/c0zC47Pv4zaUb14oGqqpmBVCrFAZBxkDgAxh1uIW73YswyQCNxxFIJAICLAE7VBp+NIs/jPg2UTYJlGJizaCHyysrwnV3H4MwrgiSDKTY7y5lWAAACAG5TpMkA0+1SoIrA2FgCO9/cBUtLoWLmTHCTwalwvPL407xuw43k8qsvjT352IszW//11oGGhgba2NjI/iaAGrZzsXElMe891nWLbli/ffLLX+cA+KovfhHc5aduVWD+gLvhZ7Xl3wOAa+5/XHnlvjvT1UvWPFjkc309lTS4apcmAjkWVd00YneARuKxkdDwjlRo4J20zj5MJyJRu822imuJ70KSuS+QRfz+bMzI9yHLk3VOkB5pHYW7qgSBHB8AIGVYcDskKJQizRhTKKUAEEuZkGWKXKcNW196FQmNo6SgGB6/HW8/38Rzi0rJJ7/8SbZz5/E5m9dcdHSqHRL/hhjHvPdY1yoAzzx1z7cZAHLlV78B2O3U61TCXqey4We15a82cE6HNv5YePS+O9OVtZd+qsjn+kY8FmWiYBMAIJU0mO4P0JjB9fCxo/8+dHDXo9yMd0x9XpJKu92+nE9GQ72ztGAvi8+6iDJZgSvUgdkzygDDgCBJOLRnLwDg8opsHNLTJ12p+M4EF3a7JLovFoznDoE+qjrthQpguQN2IccmYSyRRjCu4ZK6JXj9pbdgsYyZCfjdCCWTAEBUp/qR1EX8S2nDekKsu3a11FC7/fnf/9v3CNc1ftndX+bEZqcep9KT47Nf9+CskoN37WqRGsm3LOAHpidQWO52eH4OgImCDQAQj0Utll0k9MfirX2HPrzZGjyxdyIVuL95F+U7LuLE+6yAuTNNs3NgF9JsVs5FS9m8m9bR/v4wOl59CWgdB0kzIAA4euCgdXnZWsHfcfyHX7l8/dNT577wPzcdrqyq/pNs99R0nhq08nI8Qp7XhmDSgOrzIDc/D6PRJAL5foh2P+zgSDGiRyOxJABg48bJsej5gsAagKz+9985PKXFz2157Glfb8t+tuqLX4TL5qcep9KTV5i14sFZJQcbtnPxkSW1xrr6dgKAF5fP+HaWz+VOJQ0GgJqWxkxnQBga7D/R/caLV1qDJ/a6Vn9SAkAbGxsZ3/G6CfzAqrp2LfiO11kqrR+o/tznsfD22xEciUHxBzD99i9gxJ2Dw60dsMSM0U4nkmSwowN5ZWUNNdd91tewnUv1TU3CXbtapL131HdYA0eustKxk3l+uzA4FLFSKQMKpdAshkB2ADwdn1yuQ5KhUj566L3dIwDQuHEj/4sANTQ3C+sJsZauW/PTo+/snX3kuefMVZ+9k3KXn9iccijHZ7/2hyXZ7ZmYiJgA6AubnrfsOeXlblW5KZU0mGlpgmlpnNlc0LTkaPfB964FjB5St1qMvf6sAYBNDTyP/e7fdc45+cRjT8/Pq74IfZ09RPD74SssQMWCGuRXzcKxrk4MjCUmYiV6aM9ea7CjY9rn1l11e+NKYlRnZ5NHltQaazf1CpvWr++LdPSsUlJaj81uE8ZSJrPZMgZf8btBlEzebOkG82VlgSpyV88PvhLlnBNM8WL0XMlb48qV5j1tg1cFg6E7N3/vfrPmppsE36w5TFFEOIlx84OzSloyxnulCQB1dXUUAMry8u4AYDMtjY07AMYEmQ4Hh75tJiKnhAVLpYzGnJa67TvETevXW69ZRv4nNr355+7WjttGR0aYK79EKJk1HSwawavffQA7X3wWkO04dvw4TN2AYAKmbpBw+xEO4HMA5I0rVlgAyOb6Iqtu+w7xpZtXdw13D9/gFHhSNzgUzjh0C65cHxzFeQCASDzGXYX5AHAEADZmPOF5thjnZO66Qv7xpjecoig88qeHfsmdecW0ZvkKRmyikG0j33xkSe3Wu3a1SOOaAwBkx44dJrEF7IrDc9OUcS3TGRBGIqN7B4+99/i6+hsFa/97Z4Bz6cMvijtW1pk/Do4t/fmvt+zs6QtfZUmSFSivoH63DSe2vITmn34fIzub4WQG0n2nMNjdgcFIFGlmAADtC2kcQOUXGh68jBDCr7n7+xQAdqysMxu2bxc3rV26Z6x/5F+IJNCUaTEAMCMJqNJpuqqw0AceSbwNAGhuxnkBagJoIyFs3spLvtz2YWtl/749bPmN9RyqKijA1keW1P6oYft28ZEltVMW+k0KANPyCxcoNF3Kmc450ylnOogkIx2P/gSA9eLQKBkPDgHOCa3fIOy8+wbzrl0tn3r52c3b+vtHSlVVMovKigVtaAjb/uMhHH/2WWA0BJvNDoz0IxXuhzY2gL5gGCktY09N3ZjYqv8EAAvd6cnQpXHlSrNhOxc3r7no14mhsedUuyqoIqyhwVEYWgppzeBcVQWXx5UYDkfeGAeInRMget+9tB5gjYc7ssZGI1/9889+wqYvvQTZM2YQVRIjLtH6HPBNghUr2ORCAdTV7SQAoKi2S8c/twzNZJLkEUgq3jfQfWoLAMJ3vG5NeC4QAv7Cb61Pv/7Bdw7sO/nrWNxQnFkBFghkiydeexUnn30GZlc3uJFCti8LTsqQSMVBRBlc19Db3YbYOGGZ0pI03H4EOUgsB0A3btx4RrJ5dHgT55yTXDt+mEqmJtesigIsj4tNX7YMNru658FZJf0NnE8GiB8B6LnGHxFCCCeFuV9p3X04OxEe4bNWrwFkkbpE68ePLKntbti+WjibN1mRAQxEFK4gVCaWDkIFkUl+HxK6uZ2NDSbW1d9IAfCJCXDO6frntz7VeqTnfiOpWdnTyjksTt968lG0bt4EpDUAgMfjQTodQzSRMczcZCBUQjoeRyqpTWgRGQxqAFB+yer6HEII52cxhYQQ7rQpASJJSJngotcFm8OOsYFhLLh4BqDrz57PJtMJlV9PqPXVlnbf6HD4zrd/+xtedWkd5KwcypNaO4CfNXBOGzNG8IxnjyMuiIJYypkOAESQASpQAHgbABkeGiT1TU1CIyGMc27/xLNv/LGzc/gzlqGZ7sICIRXuIQde+B0SR1ugCAQpXYfidIJJCtJpPROCSzbkFJfB7csBM9OIaenJOaSZwYfgcJXm+ssBoH79TZMLra6vJ8A3CZOV+YokIJXSGQBI3MDgiVaqcIaWjtB+AOTopk38nAA1NDcLAIcvP/uWzgPHsuODPax86TKoDpW4VfqTR5bUJtDcTHEeCtOeU54jMTPf0sdfGJUFALDSqRMAuHPBVXTcU2Vd/djzWzvau64RJJvpLiwQe995Cy1P/wp+SYEsKZnMXpahyhmmUfLnwuYNwJVbjHjaRDQygnRkGNq4DRrfZmycEagEAK1o7lQNYsAPOICVADA4FCEAMGoAeTNnWGlCEU6b6wHwoexcck6ANq5YYdH6DYKWTN229+UtvLh0Bnfm5gs8qQWzXa4/gHNyDu2ZzOUUpzMPgAsAmGVCFGyEWUzXE5G+Bs7pKw9/S/9xcKz8oUee397fH15md/pNm0sRTzz/exz/r+cQ6zkBMRFFTuV0pIgIKDYo/kAGLH82ZF8uYiND0KLDUNxZyJ2xCExWMKabU5kBiLJUMW6oJ7nyRkLYXbtacgAsS0WTiPUMUMmwoHOCRRfPoM1/3AkfMf/59s4R+46VdebZRD6tb2oSCCF84xOP1w72jczvbdmPkqXLQWwiAPy6YXbZWENzs3Au7aH1GyYGKzRlBcwyJw04FWjISmvhRkJY4+GOmpef3bytv2t0tsufa1IJ4uGnn0DvW5tB9DhgGhjsakdhQRFcvgCY35sBJ5APf3EhhoMDAAB3SRUKyqtgjg4g1NMDADBMA4ZpgEUjECSpaOr8NjZnYhq713O1EnB7+rqCliIIBAACPifS8SQ99ueXGIvGi7MIvwIA6s+yQ7Spvp4BoDe4pY49LzTtc/iziL+sgqbiKeb02J8DQI4OD59za/GhIAEAr6K47Bll4gCg2iUAiHWc+HC08XDH3Ddf2fHWaE+s1F1cYAl6TDz0+M8RPPA2uGWCpxKAKEFLaBizDBTMnQeP6sIoofDX1iIRDIJLEooWLAFkOzqOH8XIYA/S6diZmqwZAJALAHujSma+Kyaj9dtgcvR19MHpdaHz4CGe56RsyBAAgHUeOsIFWbwWAKqbm8/UoHFyiNcI0tjRN9+MFVWWQXXKVOHmweFTBw6Bc5yLzAaAy5BRZYnQwARmpmVyAIimrZ572gar33xlx9bRYCzHXVxgCbGQ8P6Tv0Ck7SAIswAjdXqFAmCkTPhypkHK8sGbkw1qlxA20iieswDpcAjRYB8gSyA2O3TrzHeWZgZ64cgCgC0PfZOt3dQrNAL8rl0ti6jdflnvsU5OJFkIhcYAgHj8PsrSBspmlNGTB/aRseHRuvqmJnk8OzjNldP77qUA+Oxv/miGqNiXSfmVjLicUGxK86b1662MAf/LYnCWfbZdI6pau/tXL2wfDcZyveUFTIiFhP1P/QJGXxuImQaYCYhyJraRnYDNBV1PQcgNQCksgbdsJljSQHFVDdKRCCLhMBSHB1S2AYIdXEvAYpl1GGmTpLQk3OExPwCREMKldYUAIVx0OO8x7Spt7+hjfq8LwVOtfPGSObG+vpGXnQLHtMoZSA728MhAaPrspVdUjTMZpwHCsQECAJ273s+lEhV9JbmMaybcKn0DAA6OTP+rxTeJUA8AmJYJAMRSnSA2R3ZXIpGTP7eak3CI7nv8ISSGezKaA4CLCojqABQnKBXApUwimVVWCKfPD29JJWyllYjHY2AuOzz5hfD4/XBm58EeyAIkGcz6SCnLdsnqehmEYBPA7trVskB02G/oOdTOAAjhvk4zp6SUlFeXPb3r5a1fcRAL/qIiAsAaHQpRYrctGI+mTwfQbNNvLXBOEgf2v19ePmNZwO3WrHRCz3a5WgBg7uH//KsAiYTbmXU6+5CkjD0qqZnPU+Eesv+pXyA5OjgJDpHtIKobnMqQ3VkorqrG4kWXoKR2PvIrS+AuLUSgMLNrnU4XsoqmwV9eBsUfgOryQHT7oSgyEqATRQBiZIqNfnizssaDDc4dzn/TJFno7w1yp9vDO9p66cJLqpMOSn568vGf98Y1I+jJDxCnw8P7OnvATeui8ej3rDjogd2Ej3UZX376p90MqtO00MWGO4MA0NjYeF6AJqJo3TAKAUAURCIKIgyDw18xndiNMHnvpz/JaM74tspsKQeobENJ7UW4aPW1qJm/CIHZ85C3cD7KCnNQPasU6bSJQPE0uMurMqQbAE2RgbQGIxxEJDwEblqQFDEDUAYo1efN8oJz3LWrZRW83o93tLQyVbUJA4da2EWLF9HCabnf+4Is9rCeQxax2FGbww5vTjYP9nZCN83y07HTFIAOziwiAHBk39Fq1esmEnhb48qV5nj3BD9H7EMB0K3HhiZs2GSpwrRMSBIB6+3F+//xKFi4N6M5VAQEe2ZLyTZUV1WjcGYtaGEh9HmLIS1aiLKZRXD6nMh1qqioLkSaUhjj1KgTQJbXB4ciwRfIguwrBBGFyTISAB71eyl12Bycc8Idzp8lRmMkNhgFDMPSwIX5i2YeSpzq/emtrUMSCOHcYq1cEuHO8cPs64Glm+WEAOPpFJmkXEez2kiGGk0VEpsDCpfbMlvxbToVzfEf8QnQ3m96lAEArV5sHweHZGpZKo7t34nIoZ0gFOAMIAIBZBncArJLp8G1YBl4cSmkGaXIn14MlypiYY6KGoHjFVWCGhfhMlPoOPwhRnu7kQiPQNSScI4XAG0EiBkcXrsE2TCQgMhUQAh1tbMvnez7DLze6rbmvZbD6xKO7PuAra5fzR0B9133FAb0fznaoQAA0RJ9Eufw2wPo1k8gFYntnkjc2f0PnibtV4BhB4BE0sijMGEQeXDq51PB8QQKHWVFJdNEQcwMkJWrxoaDeaZlQuecwLKQ73XAqiiFTdcAIZN1a4IEVZJBXB64vD44S3KhXjIPqtOOHJ8NblUCwNADgKQMnDrUjiJuIixIKMzJA3d7EU9poHoaUjoF2eWESyUwDAYjswwKAP5rrrkNwMcHTvVyALSrv8cqq50rzKqufOgeVXq7iXPhSHOzlcnv5D7TtICAU4gnIvyZH/38Ac7PLPWIANB8OngUAUCRePgcKQkvnjarKjcr+78kmzgjzRQummmix+KCojqQTiWgWyZhNhcOt3aACTKcpTMx7vLhtjky/w7kQ/C6YJ8xCwGfA16njCv9KooB9EBAS1xH0GLQ3B4c6hiAv2I6oroBdyKKLAAsoU1OyhzNRNhUoIgRiagA8uctulODCJY2EMgOcL9qo7OXz+5+7+Xm73DOCQFY/YoVFACYboQsy4RdVbnMGVGdjiwAJyc8+0eqGlSP+2B3AkBqKnC0aDZlvYdNTU/fpHHMSlOHYXO7pYzHkkFUlSs2B/EqmSpGlFAE7ArgCyCqKLCpIkSnA4rLCcHmgCMnAGd+NnJ9dmQrIorBUU1FgJnosClIUQGzq/LRKUuwRkaQlYhDZwxc18D0NLhuQookIBedziwCAJwL5wEukYXa+ggRBDLSPcRmXFYr7Gl6pbDlsUdzyPpVnfS+eykaf5RJcnUDPKVPhUD4a2Wfc5L4rPcwA0AMI705HovcTFNaZXxkkAtSppBHHG6iSjIiAARRBAQRYy4/gDa4bDJGZBl+hxfc4YZgV2AF8qHOKIU6vwwqU9DjlAFmogfAcEJHMG1g4HgvhvfsB9I6rLFMWkESUbDxCizXEuCpFIgogLi8cF+yEFmzp2PgVC9Np03ER0KsorpYiB5tM45v2bJr2eyi4AvHQNj9D3I0/ihjKwWB/7VulzMAYrJzdBwh5WyMACAS7j8QCfXNm7bqph8UzVn0pdHkqKXYJQHbtwF6RvUtcLhKq9DbeQLJeBSK4gK329Gv61BdHigOOxwVlbD5fXBLEkoVgg6L4DDjGI3r6AknwA0LkfZuWMEQhrrboUdCoEYaVE8DehppPZPiFFdWTW7byqUXIz4wjGQ4geFgv+VQIBRWFvzp+Yce+Zo4Otz7whvbUlOcTCZeEzJ1ba6bhBkMqXgiCgCYlc/Pp0EJQySQdD37I0aaczL764+IR35+T2LJ3XcXtZ3oRJF/Hvz5Wdjz9tsQ02kwUYAMwJ9XhEPv74AWi4DYneAWkFMxA5BkyJ4AbKWVmL1kNhwuFW4JOB7VcWo4jpRhIRIMg/UMQu/vR+TkUbTt3gGYOngqCqJr4GbGqRIKFFfNgeDLQdG1VyLBBUQGBmGlU2yot1dYd9sNpzyK+KlTL/xyFIScQYtMSUj9AKBFkpxKlM9eOM/+zu+BqTbojC3lsEv9kslhWCzvLOONhuZm4fBDXzI+9eo73+08fPLjLK1ZhdMLhMOvbYYWCkIUKahpAVYmWpZ8ARAByC8sRsG0Yij+ABSPB+q0KuRUzsTYaAyj0SQ6LIL27mF0Hm3H6N6jiB08jtTJYxhoOYijh/eDUgGE6ROZI4hIQWQRxB1ARJZRsGY1bAEv+k50AwA/fvgQLl97daJwWu4N93oco3Xbd4jg5411s4gqwxqLWbLTR5ZcvfInIARs02/PjINyhoN8/IOedDIBAJUAsOI9he0YL+w1rlxpNh7uuOKN5v3fMphplSyYR4eOHcfxZ59FkVMFESTATJ9OiqgMw+6BIiuArMAEIMuZeLLj2CHkirUI5nowxhLoO3AK6eAAeHQMZHgYXe0nMHTqJKiWBNM1IG2AGNqEJo+nKh4UL1oEd3EJRk50wA7woY4BfvnHrqQVM4pvv0eVWiYaL86HDpWlIgNAONoHMTsH1G5XwTlACJ8AVQSA6iNHOAD+q1WL9q3+zVu6w2Mr55wLhBCrgXP63YZ/5Ucsw33vs9ueSMZjNFA8jbk9NvLaxl+BRUYAe+E5J5Ac6kGnZcHmdEN0++EBEGndA9v0GoiShLa2IfgVEScO7AUf7ofe04eRoX5gNJTBIhUB0gZgpAHOM+DY3eCyAzPX1sN10cUYacv0P4SGhnhxTSUtmlXaeJ/P/tzZjVBn5UgTwW8VT+kIDY6QghkVsNnVUwDQxNhkYyqdIN5J3ep891U3NzJDswAUf+n9Q4UAEHr/kMDuf5D9eNuHPwuORMrtHrdZUFlI923ejOGjHwBWEjpnwHiyao1n2HaHCmJzQ1Uzrj8djyMyOADV64Pf70eksxNmRy+G2jsR6u5A9OABDHW3AaMhMF0Di0fB0xpgxAGW0UzBZgdECRWXX4faT9Qj2h/M5GnRCM/OcVNF4vr3K6ufGH+p7Hx9B42EsDt/s8UOoCoWimIsGIS/uAQOl3pkvMQ6hQ+q30ABoKh41jSua1+Ph8dUKIocDMYWAcAjS2qNxr7Qte3dPbcBsLJKS0RrLIoTLzSBpzVwIwXL1MHHnYMgTDFr6ShSiTFo8SgUpxOqK9OoSSUJ6bZ+aLFRWKEYaCyKZCoOqiXBUxHwVBTQxzKEWkblIag2MMmGwLLVmH3LzQgPjACGgaSWsU8lVRU4+evfGSXzFgiNhDB2/7lprIbxxafzcmYByAv1DnIWjwlZhYUAcBAAaqZ4Oso2FTEAWPHN/3M4Yehd8cE2AICus1X0vnvpa5bhPfDe/l8kYyb35WSTQEkO9m76A6yBztMLOE17wLIYaDITiHNmAKYBVbUhHY8jbKThKS6A1nkKUZ5Eqmcoo23xOFgsngEnrWUyf8sCGMuML58G59Jb70BsJAwtNgZIEpihYeaCGdjzy2cQDY/G83LyMq46U8n4qIxzPSYnK4jdRqMd3SZ1ugR3fkEqEYoeBIAjU7o7xPGB6G9r8hNk6TX7okPhEp5pk1nB7n+Qvbz29u8Mh2KlNpfP8lcWC9HWbrS+9nqGTx6v8zDDBAGBwQnYOOejSjIAAg4ZWkKD25+L7JJKRHr6kRobRe6MRQglBkHCQob80jUQ0wAsPQPOBPCKHUSxwXHx5bj01juQ1HTEw2OQXHZooWEsuuJi7H7seW52nyIOIDXU3pn+i+TVafvzMQDobD3C82ZWIbsgsL+hMNDJOSdkSnGUTlAaTZxXrvnM7cuH2lsRj0YwalkVn93Xe1/7ya7Pa4xz1W2jRfk+HNryIjA2MBkYni0CFaCn0xBEEaLDDXsgCyXzFiAdj0PXUxgbGgaNJRFKDMLs64E53A/F4wF0YxLcSXOhOkCUjOZcfvsXMvMKj0Cy23h360k+d+k87P3NZkQO7wG1dGha0uhiqfMeK2hoaKCNhLD6pqYyQ5KXJIZC6D+6l1QvXYKcLNcr5+7ueGA3APAdxzrN0vk1TtnpQ7DtCIdNFeOm1jg8ErU7/AFSUJJDeo/34eR774MxC3ycdgAAw0hPbrFMbYwBgggzkYSDpTHccQq6kYbD7USq40Tmu4k4aCyJ3vb203E+55ltRQiI3Q0qqyi67BpceusdiEcjiIfHIEPkXX295Lrb6knL5jcR/uBdUC0BPRaHlE7FrP3vGVODwrO0hwIAtxXdAIfdFjzaajKTirlVVQzAlrPJMgCgjd++hK3d1Cv8srqs0x3wvTL98tW87dBJqyDgQtxgTPT7uCIIyCrOxuHXNoMFezM24qznT/hTa4oWEJsb8bSJZF8HimbNRiIYhDnQDxg6lJSJVHgY8ZPHIMsqqNOdIY5EGUR1gssOFF57I+bf8mmEQsOIh8cgSDart/sUua5+zVDzr3/bH96zG1RLcJ6KcwAwFDU+tePkbNm4YoU1fjLoVkSSOP7OW7yodgFypuXtTTz04OGJQuNHklNpXSaOiSXiz0xfMJ9QRaSq2wkAVLHZSSDfDxZPomv/AfBUFHxKueYMkDiBRYCYls60rOgxJId6AGcAjtxchFqPAJaOVCwCPRIC9CQwPAhdTyGrcFqm0mH3Ad58VK2/FTVrb0JoaAiplAEAVs9Qr3DdbfWhFfOnLz/WtOnbAMDiEcbTk2YnCgDj7YBnHp/IxHWc24qusxT7nFhPOwu3naJz6tcSd4738cbGRjZRaPwIQJsIscA52fHklq0QcbTuc5+n3b0jVjJtwZXlQ6AkH8c+PIZEV2eGPj1P6E6YBYEDdNx4c0uHPacYORUzMLpvL5LBTgAmjHAQ6UQS6UwfAUIHP0BWwTRQ/zTQ3CLU3PZFlF59HaI9/WAGwNKa2T8aEq7fcH2Py+O6aj0hrUWzZps0FgYsczLEAJA4n/2pBjjnnJgWvg0Ah7Y3M3txKZ05a3qfLZlqypTXYeF89EY9QA8/9CVjDOL9ZbOm8YG2DA1rs9tgs0noO3wSSMQAU//IwxOpjGZzevoFEEmGJ1AIZqZBkkmMBTvBUynAyMwhFYtAYDqIyJHUNIxEI8j5p3VYeNsXUXTRRRju6ERaBkLxkJkwdPHG229szfG4r/xhSfa+Bs5pOpGUrHTqjCQUljkKAMNDg+Rs7WkkhG14fe8/E7v9ouHWNmtw97tY+tnbiC/b/x/fyPXGG5pxzvK6eHaUOac9GBxKmcivqIAZi8KT75ro5QOlwpkWbMpw3Mws3CIA1WJg3ixEY2Fw3YSzqATBaASiI3Meg2kxmFEJoqqCa07A4QKtmol5a64HNxnaTpyAO5ALvavNdPkDYt0NV+x12ZS1DdmuvuX3P6E2EpIqv/RjZRktNacuavQjGnDfvbQa4PdufS/QoekPcoXy7tdf5XLtIqFmyfw+3hd8ZJxpPKf3O9OYEcJTlvnFro4B4szyZrAQJXDDQE7NPLCcHEBSPzKIlbZgcAaDZ36SMjOH4rhuQnTYYcTj4GYajGTehzLxfmU7kJeP2bfcgXlrrocZiSPa04/cQB4fOnLA9E6vFK+6+epX0339VzRku/rqORfott+bGe5KsU9NbcblbKoY8yquFhoJYe06+TG1OwtDe/axgWMHcO2/fIHkemz3Ncwui24CztvaM9lAtYkQ61HdzI6PxFYNHDgIAII3PxuqKmMsrsOe5UH1lVcCNg+IeDafZoAZOuRx26SbKbgEgIgU2TnFGIuEQEQKnkpDdgRgqC4kqQj33HlY+oW7Ub18KWIDfega7IPgcvHOtmO8pm6FeNn1y554IMdz/SNLaqMNnNNNhFjZOXkTCymnZmryRLRupmCZ5tDZHbT7P3W5ccvWPTclCb0tPDBi7dz8DGauWy9Wzyx6+16P41dTT0yeF6CGceudYPzqoXDE63I6rFg8TWRJAmQBMA3EI0kUzF2G4mWrAMmZaSOb6Mk0dTBdhyBQyESAEYtBVhQEsgoxGhlFNDKS4XJUBWkqwSgoQc1NN2HOhtvgLi/HqZOnoDEOl9NhdR35kFy6agVdUjfnWw947XdyztlEgAcAL2x63hqfd5mRTsNiFiyLUW5aSBl6BwC8U7eY1W3fIe5YWWfe2LR1YVwznmApzg5segY2dw6uvv1Tcbso3AlC+JFzxUtn26CaFZkvJWKpa4NdfdzucvHk0CB8JAu2Yh9SAOKDvQjkFWLmDZ9EOBpGYvdbIAYBH4+JND0NG3fDIARs3O16c/Iw0rIH1JspI3NfPgqXXoaa666Fc/pMDHX3Y7i7G1l2L4KhQZPoKXHVhusjeeUln77Pa9/cxLlAAIbTjZUUAMu9aFWxC5ip6+MtfwIlADQA7QCw1Fct7FhZZ9zYtHVaCvY/EkVx9by9hY2dOMJvfuZ3Yl5h4Kv3qNLxv6Y9GYA4J+sJsT79+geusdHI8ng4RHIKi2gwkoAsCdAshrwsN7SxUQzG48irqsK8Gzdgj56C0fIBoFNwXYNhZChXGAygBKmkhqyquWjr7QX3BJBVMwczr1mLvMULIRhp9B8+Dk3nyLJ7edeRD1lOdblYd9XHWlRJuPUBr/1gA+fi+rP4HFK3mvIdr3OHIq2EZaop07CoQInJCSTgZGdZwcDym38tvXP3p40bm7YW6qCv6bJcEH9vl3X0pc38Y/f/QCybXvT0Par01LnGP+cWW/tCHwWA6sU11XpKz9fCo5zYFEqN8Yhdz5SN56yoQ297K4bb22ALZOPiz9wN+8LLMuyebJt09cThhuDNwmA8CWlGDfLqN2Dp17+Nax74LsouW4LwwDBadn+YYR1lYnW2HSOzr6gTrl93ze+EYyeWPZDvO9iwffs5ya77VixhADiTlQ0JLTnRKMqIKCBtmdu+0/QbPg5OSQr217nsmBU/ccx69/dP8WVf/oq4+NrLtr35uxc/zzmnjefxWh/RoLnrCvlmALVOOb6vd9gwklFx3LiQaCSGgFyEwXAM8xfPQCh8PQ6/0AQqScipnIn5t3wBXW4/eg7th5WIQQOF5HRDzCqAv2oWKj52BWZk+WCAIjY0hqH2Exmt8Xp5x8ley5XtFK/fcH0stzj/7vtc6lOYQu+eo91PaGxstEpXfPxih6wsj4+NMIlSKlCBi4JoGYK0uZEQ9vGmNxanoD5PZKEk1HLYevdXj/LZt9whXnnLDft4X/AT73ztNmPjWAfFX2jKOGccVAzwmJGkE6URm0wwNBhBtUARNTjGoilcuWoxAi47WnYfhdbfA5snC6WfuQO2Qy0YOn4Uvmn5mD57PvyzikH8mZ4qrpsYaW1HsKsPjsJCYCRidX34oTBryaXixStq35cN8877XGpLE+fCeoBtOrdNIGuKZpFXADhc/h9qA50SGLc4Y0RwqnTMYmN9H247cuv2A/880B9+SnTItvjePda7v3+Kz77lDvH6L918ePhUx5oJb3i+M/LnBKhmnGHrAbJdkl0AwLiWpg67C8GBkxhu74c7PxvDsTRSKR3Vi2tQVjsDIwMhyM7MiZnS6nK48TFw1Z7xerqFxGgM3b0jcFMAkgqHP4CO3bvhzM8XLv/0TUZ5ee73G+uueMDa/57RsH37X7QHVbd/TXzl4W8ZNdd99utIJ1YaQ/2WoqoCAOipFISSmd6rHn1u38BwrAQAOl/7k3Vq25/Z8n/7trR87dXvRk623fDIktrhvxecsyNpweZ1IzqSIcyTRhq5+XnYtuU9XLXhY8gO2BENJdHZMwqqSFB9njMGSskqeEpHfCCG6EAYpq4DDjuiDHDDAk/ovGzxYnP5itpm2bC+c59L3Q1CMD7p84FDq27/mnD8yYeMaatuuhbAD+PtxywqSnSCexJ82Si58RbYpxWVDLe18xOvbGZjwSC98ZHHhJLFNS/t/cPLn9r6hZti443sFv5OESfigGIg6MxyGQCk2EAftwWyCZiIsulFeP1Xz2POJbXIKS2H3WkDNyzw8ZyKSALGRmNIJ1IQZRHxRAocHAGvCyODQwgODKKyZgZfdeNlCHb0j32/dNadfKyrg3NONz6wm2LjRgZ8kwA/mDgcQ9bVtxOtaC555eFvmceffIhd8onbb4QoPRM8tFdgug5ZlAk3GeC0IbD2RlCbHa2v/ZEdffNNlrfkMvFzDzbysvKi796jSvdNnJ7874ADAGRC7RqHY7NtMt3/ix8+Kca7O7Dys58hw72DgA6oNhG9oRFYWgqCTYXD7gGTJDg9dnjzsxEZi4NrGmxuF5yyhOGRMIKHWjCtvBJzL6nGUPcg9r++lS+dVUMADHe/u/tHf37iu4+PN46dVzxz6qZVL1j0r1xLfDF4aC/MRJzLokxMcDhsKnzL1oBWlfEPNj3PmMGE1V++G/PWLD9qJZJf/mFJ9raGjLfi+BsuOTkvQBPXMVz+yr4FH7uidt+enUfZyw/9gmZPn46F161BMpxAYiwG1SYiTSnSYFBAAZsKYrNNnlkXJJEPx1Ns7MgRkp2dw6fPrSBIxWnrG7vR9d47EEcGAD3NZy2/ghTNrwVtO9rWHTX/EA6HX/3gg52nrGM7NSI6FceyVd45JRVz/X7/VeFweF28q80/1n4805wuSoSZBvJz8zEiqbwP3GIGE2uuX4dLr6lL5k2f9tOBn/z8R4823puYuCHif3p5C5migvyu1t7mmtK8y5565iXj2GvbJFlVUbFiKXLyi8FSHESkk6dukkYaiXCIx8MhlkxqyK6aIyyoq4WiSrAJFO+8uQctv3/Wcg90waFIlMbHiGUYSMQj3O3LYjNr5wvTKkomk8zuqKmxhKaOpTUnAIWNhhDqPIHo6IilEEGgsgym69xudzDD6UEsr1AoXLwcc1dcqlfMq3iWRxM/aSgMHDn7bpF/HECUsrrXDlQvm1/6XpHX4f3T63vNw9t2kFB3BwEAWVWhOh2Y0oJHRH+OUFY7FyW1M5Gb4wy7gBc7+sMvdo0klvsV8RZtLFzSsWULxrZuhkwoo5LAAAgp3YChJTmVROZ1+QTZYSeyqEI3U0il00iPjVqanuY2WRGoKEEzUkwhAvXk5hHPgsvgunwZKuZUDuYW57/IU8ZjDdmuw5PH2AH2P9lS5739ZcIW1W09ePHCOcXP5PtdVQDQ2R1Ef28YqczZcrg9LjgCbviyvVAIjSmK8H5aS2/+8MOOl169at4ATt8+5bJfMm+1AVzX+ufmVaeef7ZAG+iGKksZUp/xDG1hGkhzaxJ0hQhnzIuKkqg6nZA9AXjrrhpecvN1O51Fuf81dLj1lUeW1IYmgDkC8L/Xhf9dAE0FyXfzV53Lv/ylG6fne65VJWEmJNmlZM6AxLhp9eiEHkoltV1dB1t3v3Ddpb1TLyLYtGkTUF+PqQHfa5bh/cUDT1+8/fGHVyqKfKvKWbZMqARKILIJ0p9PPSABVZQgyjIUh0eXXc4nIjkFf1j/25+1NhIyMvV5/1vAnLej6hzBFHXc8HmVpU2ibXlSO7ss0sA5RXNz5rDdVNXmnNRP5bwnHphT6c5WaKEgyv8kC4IDjDNmGgQATEGALAhw2O0cDi8VFDUJ4E+Hml86PPV5NQD5R28l/L23S9Vt3yE2cS4QMpVwzFzWNnFJWkNDA/1bx7vm7u8L5+oB/FtkXf2NAq3f8Dddyva/rkHn/M5EFYOQcxfk/ht3IpK61fQypPFOW+hMLCsKJk8RAcCOHZcy4AcMF+SCXJALckEuyAW5IBfkglyQC/L/j/xfq+fbjAR5q/0AAAAASUVORK5CYII='
-
-// Jarvis palette + fonts lifted from Itsme23476/jarvis-hermes-dashboard
-// (ui/styles.css, verified above): cyan/amber on near-black, JetBrains Mono
-// display font. This is the plugin-layer (expanded) theme; the core-wide
-// DesktopTheme is a separate artifact we build next.
-const JV = {
-  bg: '#02070c',
-  bg2: '#061722',
-  panel: 'rgba(5,18,28,.64)',
-  edge: 'rgba(57,232,255,.24)',
-  edge2: 'rgba(57,232,255,.55)',
-  cyan: '#40f3ff',
-  cyan2: '#16b8d4',
-  ink: '#e8fbff',
-  mut: '#83b7c4',
-  dim: '#47717f',
-  amber: '#ffb648',
-  red: '#ff5d6c',
-  green: '#39f5a6',
-  violet: '#a884ff',
-  disp: '"Chakra Petch",system-ui,sans-serif',
-  mono: '"JetBrains Mono",ui-monospace,Menlo,monospace'
+// ═══ 4. BRAND MARK — glyph logo (Colonna MT "L", cyan glow, amber under-shadow) ═══
+// Single glyph; emoji planet removed. No image assets needed.
+function LogoMark(small) {
+  const pxw = small ? 32 : 56   // container width (planet overhangs the L)
+  const px = small ? 31 : 52    // glyph size (+30%)
+  return jsx('span', {
+    style: { position: 'relative', display: 'inline-block', width: pxw + 'px', height: px + 'px', lineHeight: '1' },
+    children: [
+      // the L — fills the container, vertically centered
+      jsx('span', {
+        style: {
+          position: 'absolute', left: '0', top: '50%', transform: 'translateY(-50%)',
+          fontFamily: '"Colonna MT", serif',
+          fontSize: px + 'px',
+          color: LARS_STYLE.cyan2,
+          textShadow: `-2.5px 2.5px 4px rgba(168,85,247,0.85), 0 0 6px ${LARS_STYLE.cyan}77, 0 0 16px ${LARS_STYLE.cyan}33`,
+          filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.7))',
+          lineHeight: '0.85'
+        },
+        children: 'L'
+      })
+    ]
+  })
 }
 
-// ── VoiceLink v2 — all-in-page voice engine (Pocket format) + native RPC brain ─
-// Ported from AxiomLC/lars-pocket-tts (proven semi-streaming):
-//   Web Speech STT + 2 s silence turn-taking + echo defence → sentence chunker →
-//   Pocket TTS :8001 (streamed WAV) → gapless Web Audio playback → barge-in/re-arm.
-// Brain: NATIVE desktop session — no API server, no helper server:
-//   host.request RPC (session.most_recent/resume/create, prompt.submit,
-//   session.interrupt, session.close) against profile 'lars2', deltas via the
-//   gateway event stream (message.delta/message.interim/message.complete).
-// Visuals unchanged — same interface as the old link: start/stop/startCapture/
-// typed/log/state ('deaf'|'hot'|'user'|'lars').
+// ═══ 5. VOICE ENGINE CONFIG ═══
+// Ported from AxiomLC/lars-pocket-tts (proven semi-streaming): Web Speech STT +
+// 2 s silence turn-taking + echo defence → sentence chunker → Pocket TTS
+// streamed WAV → gapless Web Audio → barge-in/re-arm.
+// Brain: NATIVE desktop session — no API server, no helper server: host.request
+// RPC (session.most_recent/resume/create, prompt.submit, session.interrupt,
+// session.close) against PROFILE, deltas via gateway event stream
+// (message.delta/interim/complete). Interface unchanged:
+// start/stop/startCapture/typed/log/state ('deaf'|'hot'|'user'|'lars').
 const PROFILE = 'lars2'
 const TTS_URL = 'http://127.0.0.1:8000/tts'
 const TTS_VOICE = 'jean'
-// Fire-and-forget diagnostic mirror — everything the transcript sees also lands
-// in Hermes' own plugins/lars/voice-events.log via the gateway-mounted
-// plugin_api backend (POST /voice-log, capped at the last 100 entries).
-// Readable by Hermes agents (plain file) or: GET /api/plugins/lars/voice-log.
-function diag(src, msg) {
-  try {
-    if (!pluginCtx || !pluginCtx.rest) return
-    pluginCtx.rest('/voice-log', {
-      method: 'POST', body: { src, level: /\.err$|^err$/.test(src) ? 'error' : 'info', msg: String(msg).slice(0, 500) }
-    }).catch(() => {})
-  } catch (e) {}
-}
 
-const CFG = {
+// VOICE_KNOBS — the voice engine's behavior tuning (edit + reload plugins).
+const VOICE_KNOBS = {
   SILENCE_MS: 2000,        // silence before an utterance is sent
   STT_LANG: 'en-US',
   BARGE_GRACE_MS: 500,     // ignore mic speech right after our audio starts
@@ -124,13 +115,28 @@ const CFG = {
   // ---- STT fallback tuning (voice2/stt_local.py, faster-whisper 'base') ----
   STT_URL: 'http://127.0.0.1:8107/transcribe',
   STT_ON_LEVEL: 0.030,     // mic peak amplitude above this = user speaking (mic sensitivity; raise if false-positives)
-  SILENCE_MS: 2000,        // ← user-speech end timeout: silence this long commits the utterance (was 2000; tweak here)
   STT_MIN_AUDIO_MS: 400,   // shorter than this is noise, discard
   BARGE_RMS: 0.060,        // while Lars speaks: peak above this for N polls = barge-in (echo risk knob; keep > STT_ON_LEVEL)
   BARGE_POLLS: 4,          // consecutive ~21 ms polls above BARGE_RMS required
 }
 
+// ═══ 6. DIAG — fire-and-forget log mirror to Hermes' voice-events.log ═══
+// Transcript-visible events land in ~\AppData\Local\hermes\plugins\lars\voice-events.log
+// via the gateway-mounted plugin_api backend (POST /voice-log, last-100 cap).
+// Readable by Hermes agents (plain file) or GET /api/plugins/lars/voice-log.
+function diag(src, msg) {
+  try {
+    if (!pluginCtx || !pluginCtx.rest) return
+    pluginCtx.rest('/voice-log', {
+      method: 'POST', body: { src, level: /\.err$|^err$/.test(src) ? 'error' : 'info', msg: String(msg).slice(0, 500) }
+    }).catch(() => {})
+// ═══ 7. MIC HELPERS + STREAMING CHUNKER ═══
+  } catch (e) {}
+}
+
 const SpeechRecognitionCtor = null // Web Speech removed: Google endpoint unreachable from Electron renderer — STT is now local whisper via :8107
+
+// (font note removed — all scheme fonts are Windows built-ins, see LARS_STYLE)
 
 function setupMicTrack() {
   return navigator.mediaDevices.getUserMedia({ audio: {
@@ -143,16 +149,16 @@ function makeChunker(pushSentence) {
   function findCut() {
     if (isFirst) {
       const m = buffer.slice(0, 64).match(/[.!?](\s|$)/)
-      if (m && buffer.slice(0, m.index + 1).trim().length >= CFG.FIRST_SENTENCE_MIN)
+      if (m && buffer.slice(0, m.index + 1).trim().length >= VOICE_KNOBS.FIRST_SENTENCE_MIN)
         return m.index + 1
       const comma = buffer.indexOf(',')
-      if (comma >= 0 && comma + 1 >= CFG.FIRST_CLAUSE_MIN) return comma + 1
+      if (comma >= 0 && comma + 1 >= VOICE_KNOBS.FIRST_CLAUSE_MIN) return comma + 1
       return null
     }
     const m = buffer.slice(0, 160).match(/[.!?](\s|$)/g)
     if (m) {
       const end = buffer.indexOf(m[m.length - 1]) + 1
-      if (buffer.slice(0, end).trim().length >= CFG.SENTENCE_MIN) return end
+      if (buffer.slice(0, end).trim().length >= VOICE_KNOBS.SENTENCE_MIN) return end
     }
     return null
   }
@@ -416,8 +422,8 @@ function createVoiceLink(stateAtom, onText) {
 
   // ---- STT: local faster-whisper fallback + VAD silence commit + barge-in ----
   // Pipeline: mic stream → RMS VAD → capture Float32 PCM while user speaks →
-  // after CFG.SILENCE_MS of silence, resample to 16 kHz, encode WAV, POST to
-  // CFG.STT_URL (voice2/stt_local.py) → text → commitUtterance.
+  // after VOICE_KNOBS.SILENCE_MS of silence, resample to 16 kHz, encode WAV, POST to
+  // VOICE_KNOBS.STT_URL (voice2/stt_local.py) → text → commitUtterance.
   L.startListening = async () => {
     if (L.listening) return
     let track
@@ -438,7 +444,7 @@ function createVoiceLink(stateAtom, onText) {
       const ch = L.cap; const sr = ctxM.sampleRate
       L.cap = []; L.capSpeech = false; L.silMs = 0
       const durMs = ch.length * POLL_MS
-      if (durMs < CFG.STT_MIN_AUDIO_MS) return            // too short = noise
+      if (durMs < VOICE_KNOBS.STT_MIN_AUDIO_MS) return            // too short = noise
       const total = ch.reduce((n, b) => n + b.length, 0)
       if (!total) return
       try {
@@ -460,7 +466,7 @@ function createVoiceLink(stateAtom, onText) {
         v.setUint32(24, 16000, true); v.setUint32(28, 16000 * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true)
         str(36, 'data'); v.setUint32(40, pcm.length * 2, true)
         for (let i = 0; i < pcm.length; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true)
-        const resp = await fetch(CFG.STT_URL, { method: 'POST', signal: myGenAbort(), headers: { 'Content-Type': 'audio/wav' }, body: wav })
+        const resp = await fetch(VOICE_KNOBS.STT_URL, { method: 'POST', signal: myGenAbort(), headers: { 'Content-Type': 'audio/wav' }, body: wav })
         if (!resp.ok) throw new Error('stt http ' + resp.status)
         const j = await resp.json()
         const text = (j.text || '').trim()
@@ -480,15 +486,15 @@ function createVoiceLink(stateAtom, onText) {
         // barge-in channel: sustained energetic speech while Lars is talking
         L.levelWho = 'lars'
         L.roll = []
-        if (peak > CFG.BARGE_RMS) {
+        if (peak > VOICE_KNOBS.BARGE_RMS) {
           L.bargeRun++
-          if (L.bargeRun >= CFG.BARGE_POLLS && performance.now() - L.speakingStart > CFG.BARGE_GRACE_MS) { L.bargeRun = 0; L.bargeIn() }
+          if (L.bargeRun >= VOICE_KNOBS.BARGE_POLLS && performance.now() - L.speakingStart > VOICE_KNOBS.BARGE_GRACE_MS) { L.bargeRun = 0; L.bargeIn() }
         } else L.bargeRun = 0
       } else {
         // hot-mic capture: ring buffer + utterance recording + SILENCE_MS commit
         L.levelWho = L.capSpeech ? 'user' : ''
         L.roll.push(new Float32Array(L.vadBuf)); if (L.roll.length > 14) L.roll.shift()
-        if (peak > CFG.STT_ON_LEVEL && !L.capSpeech) {
+        if (peak > VOICE_KNOBS.STT_ON_LEVEL && !L.capSpeech) {
           L.capSpeech = true; L.silMs = 0
           L.cap = L.roll.map(b => new Float32Array(b))   // include pre-roll so word onsets survive
           L.roll = []
@@ -496,10 +502,10 @@ function createVoiceLink(stateAtom, onText) {
         if (L.capSpeech) {
           L.cap.push(new Float32Array(L.vadBuf))
           if (L.cap.length * POLL_MS > 20000) { finalize(); }        // safety cut at 20 s
-          else if (peak > CFG.STT_ON_LEVEL) L.silMs = 0
+          else if (peak > VOICE_KNOBS.STT_ON_LEVEL) L.silMs = 0
           else {
             L.silMs += POLL_MS
-            if (L.silMs >= CFG.SILENCE_MS) finalize()
+            if (L.silMs >= VOICE_KNOBS.SILENCE_MS) finalize()
           }
         }
       }
@@ -523,18 +529,19 @@ function createVoiceLink(stateAtom, onText) {
   function maybeBarge(heard) {
     if (!L.llmActive || !heard) return false
     const now = performance.now()
-    if (now - L.speakingStart < CFG.BARGE_GRACE_MS) return false
+    if (now - L.speakingStart < VOICE_KNOBS.BARGE_GRACE_MS) return false
     const spokenSet = new Set((L.spokenWords || []).slice(-60))
     const heardWords = heard.toLowerCase().split(/\s+/).filter(Boolean)
-    const buttons = heardWords.some(w => CFG.BARGE_WORDS.has(w))
+    const buttons = heardWords.some(w => VOICE_KNOBS.BARGE_WORDS.has(w))
     const novel = heardWords.filter(w => w.length > 2 && !spokenSet.has(w)).length
-    if (buttons || novel >= CFG.BARGE_MIN_NOVEL) {
+    if (buttons || novel >= VOICE_KNOBS.BARGE_MIN_NOVEL) {
       L.spokenWords = heardWords
       L.bargeIn()
       return true
     }
     return false
   }
+// ═══ 8. VOICE ENGINE (createVoiceLink) — STT capture / TTS stream / brain RPC ═══
 
   // barge-in: flush TTS + interrupt the agent turn; keep listening
   L.bargeIn = () => {
@@ -582,12 +589,13 @@ function createVoiceLink(stateAtom, onText) {
 // service per Voice-AI-README.md (rev 2) once built — AudioWorklet PCM capture,
 // WebSocket to :8000, streamed TTS playback. EXPAND → core Hermes session chat.
 // Icon buttons — inline SVG (no SDK icon import risk), borderless per spec.
+// ═══ 9. INLINE SVG ICONS (no SDK icon import risk — borderless per spec) ═══
 // +30% (2026-09-27): mic 16→21, kbd 17→22. MicIcon takes `on` → green tint.
 function MicIcon({ on }) {
-  const c = on ? JV.green : JV.mut
+  const c = on ? LARS_STYLE.green : LARS_STYLE.mut
   return jsxs('svg', {
     width: '21', height: '21', viewBox: '0 0 24 24',
-    style: on ? { filter: `drop-shadow(0 0 4px ${JV.green})` } : undefined,
+    style: on ? { filter: `drop-shadow(0 0 4px ${LARS_STYLE.green})` } : undefined,
     children: [
       jsx('rect', { x: '9', y: '3', width: '6', height: '11', rx: '3', fill: c }),
       jsx('path', { d: 'M5 11a7 7 0 0 0 14 0', stroke: c, strokeWidth: '1.6', fill: 'none', strokeLinecap: 'round' }),
@@ -600,12 +608,12 @@ function KbdIcon() {
   return jsxs('svg', {
     width: '22', height: '22', viewBox: '0 0 24 24',
     children: [
-      jsx('rect', { x: '2', y: '6', width: '20', height: '12', rx: '2', fill: 'none', stroke: JV.mut, strokeWidth: '1.5' }),
-      jsx('line', { x1: '6', y1: '10', x2: '6', y2: '10', stroke: JV.mut, strokeWidth: '2', strokeLinecap: 'round' }),
-      jsx('line', { x1: '10', y1: '10', x2: '10', y2: '10', stroke: JV.mut, strokeWidth: '2', strokeLinecap: 'round' }),
-      jsx('line', { x1: '14', y1: '10', x2: '14', y2: '10', stroke: JV.mut, strokeWidth: '2', strokeLinecap: 'round' }),
-      jsx('line', { x1: '18', y1: '10', x2: '18', y2: '10', stroke: JV.mut, strokeWidth: '2', strokeLinecap: 'round' }),
-      jsx('line', { x1: '7', y1: '14', x2: '17', y2: '14', stroke: JV.mut, strokeWidth: '1.6', strokeLinecap: 'round' })
+      jsx('rect', { x: '2', y: '6', width: '20', height: '12', rx: '2', fill: 'none', stroke: LARS_STYLE.mut, strokeWidth: '1.5' }),
+      jsx('line', { x1: '6', y1: '10', x2: '6', y2: '10', stroke: LARS_STYLE.mut, strokeWidth: '2', strokeLinecap: 'round' }),
+      jsx('line', { x1: '10', y1: '10', x2: '10', y2: '10', stroke: LARS_STYLE.mut, strokeWidth: '2', strokeLinecap: 'round' }),
+      jsx('line', { x1: '14', y1: '10', x2: '14', y2: '10', stroke: LARS_STYLE.mut, strokeWidth: '2', strokeLinecap: 'round' }),
+      jsx('line', { x1: '18', y1: '10', x2: '18', y2: '10', stroke: LARS_STYLE.mut, strokeWidth: '2', strokeLinecap: 'round' }),
+      jsx('line', { x1: '7', y1: '14', x2: '17', y2: '14', stroke: LARS_STYLE.mut, strokeWidth: '1.6', strokeLinecap: 'round' })
     ]
   })
 }
@@ -666,9 +674,9 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
   // Glow per state (2026-09-27): user talking → green, Lars talking → dark
   // purple, off/hot-listening → plain (the green tint lives on the mic icon).
   const glow =
-    vstate === 'user' ? `0 0 30px ${JV.green}77`
-    : vstate === 'lars' ? `0 0 30px ${JV.violet}88`
-    : `0 0 24px ${JV.cyan}22`
+    vstate === 'user' ? `0 0 30px ${LARS_STYLE.green}77`
+    : vstate === 'lars' ? `0 0 30px ${LARS_STYLE.violet}88`
+    : `0 0 24px ${LARS_STYLE.cyan}22`
 
   // Cosmetics 2026-09-27 (NOTES.md): bars removed, outer solid ring removed,
   // ring speeds -50%, core = dark purple/black, graphic +30% (53→69px).
@@ -724,19 +732,20 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
       flex: 1,
       width: '100%',
       overflowY: 'auto',
-      border: `1px solid ${JV.edge}`,
+      border: `1px solid ${LARS_STYLE.edge}`,
       borderRadius: '6px',
       background: 'rgba(2,7,12,0.55)',
       padding: '8px',
       fontSize: '11px',
-      color: JV.mut
+      fontFamily: LARS_STYLE.sans, // transcript body = Tahoma
+      color: LARS_STYLE.mut
     },
     children: (entries || []).length
       ? entries.map((e, i) => jsxs('div', {
           key: i,
-          style: { marginBottom: '4px', color: e.role === 'user' ? 'rgba(64,200,255,1)' : e.role === 'err' ? JV.amber : JV.ink },
+          style: { marginBottom: '4px', color: e.role === 'user' ? 'rgba(64,200,255,1)' : e.role === 'err' ? LARS_STYLE.amber : LARS_STYLE.ink },
           children: [
-            jsx('span', { style: { color: JV.dim, marginRight: '4px' },
+            jsx('span', { style: { color: LARS_STYLE.dim, marginRight: '4px' },
               children: e.role === 'user' ? 'you:' : e.role === 'err' ? 'err:' : 'lars:' }),
             e.text
           ]
@@ -756,11 +765,11 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
     style: {
       width: '100%',
       background: 'rgba(2,7,12,0.55)',
-      border: `1px solid ${JV.edge}`,
+      border: `1px solid ${LARS_STYLE.edge}`,
       borderRadius: '6px',
-      color: JV.ink,
+      color: LARS_STYLE.ink,
       fontSize: '11px',
-      fontFamily: JV.mono,
+      fontFamily: LARS_STYLE.narrow, // typebox = Arial Narrow (specs input)
       padding: '6px 8px',
       outline: 'none'
     }
@@ -781,7 +790,7 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
       flexDirection: 'column',
       alignItems: 'center',
       padding: '8px',
-      fontFamily: JV.mono,
+      fontFamily: LARS_STYLE.mono,
       zIndex: 9999
     },
     children: [
@@ -802,15 +811,15 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
                 jsx('radialGradient', {
                   id: 'ljCoreGg',
                   children: [
-                    jsx('stop', { offset: '0%', stopColor: JV.green, stopOpacity: '0.5' }),
-                    jsx('stop', { offset: '100%', stopColor: JV.green, stopOpacity: '0' })
+                    jsx('stop', { offset: '0%', stopColor: LARS_STYLE.green, stopOpacity: '0.5' }),
+                    jsx('stop', { offset: '100%', stopColor: LARS_STYLE.green, stopOpacity: '0' })
                   ]
                 }),
                 jsx('radialGradient', {
                   id: 'ljCoreGv',
                   children: [
-                    jsx('stop', { offset: '0%', stopColor: JV.violet, stopOpacity: '0.55' }),
-                    jsx('stop', { offset: '100%', stopColor: JV.violet, stopOpacity: '0' })
+                    jsx('stop', { offset: '0%', stopColor: LARS_STYLE.violet, stopOpacity: '0.55' }),
+                    jsx('stop', { offset: '100%', stopColor: LARS_STYLE.violet, stopOpacity: '0' })
                   ]
                 })
               ]
@@ -818,40 +827,40 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
             // faint solid base ring (outermost) — 2× thickness (1.4 → 2.8)
             jsx('circle', {
               cx: '24', cy: '24', r: '20.6',
-              fill: 'none', stroke: JV.cyan, strokeOpacity: '0.14', strokeWidth: '2.8'
+              fill: 'none', stroke: LARS_STYLE.cyan, strokeOpacity: '0.21', strokeWidth: '2.8'
             }),
             // dashed slow rings (counter-rotating) — the "orbiting dots".
             // Gap from the base ring tripled: 19 → 15.8 (gap 20.6→4.8 ... kept
             // separation between the two dash rings: 15.8 / 12.6)
             jsx('circle', {
               cx: '24', cy: '24', r: '15.8',
-              fill: 'none', stroke: JV.cyan, strokeOpacity: '0.35', strokeWidth: '0.7',
+              fill: 'none', stroke: LARS_STYLE.cyan, strokeOpacity: '0.52', strokeWidth: '0.7',
               strokeDasharray: '2 10',
               style: { transformOrigin: '24px 24px', animation: 'ljSpin 42s linear infinite' }
             }),
             jsx('circle', {
               cx: '24', cy: '24', r: '12.6',
-              fill: 'none', stroke: JV.cyan, strokeOpacity: '0.3', strokeWidth: '0.6',
+              fill: 'none', stroke: LARS_STYLE.cyan, strokeOpacity: '0.45', strokeWidth: '0.6',
               strokeDasharray: '1 8',
               style: { transformOrigin: '24px 24px', animation: 'ljReverse 30s linear infinite' }
             }),
-            // comet arcs — 3 lengths/thicknesses, dim amber (JV.amber #ffb648)
+            // comet arcs — 3 lengths/thicknesses, dim amber (LARS_STYLE.amber #ffb648)
             // biggest arc ghosted
             jsx('circle', {
               cx: '24', cy: '24', r: '21',
-              fill: 'none', stroke: 'rgba(64,243,255,0.15)', strokeWidth: '1.6',
+              fill: 'none', stroke: 'rgba(64,243,255,0.23)', strokeWidth: '1.6',
               strokeLinecap: 'round', strokeDasharray: '14 118',
               style: { transformOrigin: '24px 24px', animation: 'ljSpin 12s linear infinite' }
             }),
             jsx('circle', {
               cx: '24', cy: '24', r: '18',
-              fill: 'none', stroke: 'rgba(255,182,72,0.10)', strokeWidth: '1.1',
+              fill: 'none', stroke: 'rgba(255,182,72,0.15)', strokeWidth: '1.1',
               strokeLinecap: 'round', strokeDasharray: '8 105',
               style: { transformOrigin: '24px 24px', animation: 'ljReverse 8s linear infinite' }
             }),
             jsx('circle', {
               cx: '24', cy: '24', r: '16',
-              fill: 'none', stroke: 'rgba(255,182,72,0.1)', strokeWidth: '0.8',
+              fill: 'none', stroke: 'rgba(255,182,72,0.15)', strokeWidth: '0.8',
               strokeLinecap: 'round', strokeDasharray: '6 95',
               style: { transformOrigin: '24px 24px', animation: 'ljSpin 17s linear infinite' }
             }),
@@ -859,16 +868,16 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
             // ring band, pointing inward — tips stop at the inner of the two
             // dashed orbits BEFORE the deepest one (tips at r≈16.2), so the
             // dash ring at 15.8 rides at the teeth's edge and the deeper
-            // orbits stay clear. Same transparency as the ring (0.14).
+            // orbits stay clear. Fan brightened with the ver-1.3 pass (0.21).
             jsx('g', {
-              opacity: '0.14',
+              opacity: '0.21',
               children: Array.from({ length: 70 }, (_, i) =>
                 jsx('line', {
                   x1: (24 + Math.cos((i / 70) * Math.PI * 2) * 20.2).toFixed(2),
                   y1: (24 + Math.sin((i / 70) * Math.PI * 2) * 20.2).toFixed(2),
                   x2: (24 + Math.cos((i / 70) * Math.PI * 2) * 16.2).toFixed(2),
                   y2: (24 + Math.sin((i / 70) * Math.PI * 2) * 16.2).toFixed(2),
-                  stroke: JV.cyan, strokeWidth: '0.35'
+                  stroke: LARS_STYLE.cyan, strokeWidth: '0.35'
                 }, 'f' + i))
             }),
             // state halos: green (user) / violet (Lars) — start AT the core ring
@@ -876,10 +885,9 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
             // Opacity 0 idle — driven live by the pulse loop below.
             jsx('circle', { id: 'ljHaloU', cx: '24', cy: '24', r: '12.6', fill: 'url(#ljCoreGg)', opacity: '0' }),
             jsx('circle', { id: 'ljHaloL', cx: '24', cy: '24', r: '12.6', fill: 'url(#ljCoreGv)', opacity: '0' }),
-            // solid core disc — JV.cyan @ same transparency as the outermost
-            // ring (0.14), pulsing via scale; +30% (5.4 → 7.0)
+            // solid core disc — cyan @ brightened 0.21, pulsing via scale; +30%
             jsx('circle', { id: 'ljCore', cx: '24', cy: '24', r: '7.0',
-              fill: JV.cyan, fillOpacity: '0.14' })
+              fill: LARS_STYLE.cyan, fillOpacity: '0.21' })
           ]
         }),
         jsx('div', {
@@ -891,7 +899,7 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
             fontSize: '13px',
             fontWeight: '700',
             letterSpacing: '0.14em',
-            color: 'rgba(232,251,255,0.29)',
+            color: 'rgba(232,251,255,0.44)',
             textShadow: 'none',
             pointerEvents: 'none'
           },
@@ -928,8 +936,8 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
             children: jsxs('svg', {
               width: '18', height: '18', viewBox: '0 0 24 24',
               children: [
-                jsx('path', { d: 'M4 12a8 8 0 0 1 13.6-5.7M20 12a8 8 0 0 1-13.6 5.7', stroke: JV.cyan, strokeWidth: '1.6', fill: 'none', strokeLinecap: 'round' }),
-                jsx('path', { d: 'M18 3v4h-4M6 21v-4h4', stroke: JV.cyan, strokeWidth: '1.6', fill: 'none', strokeLinecap: 'round', strokeLinejoin: 'round' })
+                jsx('path', { d: 'M4 12a8 8 0 0 1 13.6-5.7M20 12a8 8 0 0 1-13.6 5.7', stroke: LARS_STYLE.cyan, strokeWidth: '1.6', fill: 'none', strokeLinecap: 'round' }),
+                jsx('path', { d: 'M18 3v4h-4M6 21v-4h4', stroke: LARS_STYLE.cyan, strokeWidth: '1.6', fill: 'none', strokeLinecap: 'round', strokeLinejoin: 'round' })
               ]
             })
           }),
@@ -956,6 +964,7 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
 // ── Titlebar utilities (desktop params + resource use) ──────────────────────
 // Left: Profile, Model, Ver, OS, Gateway, Agents, Sessions, Uptime
 // Right: "Hermes Resource Use:" + CPU, RAM, HDD
+// ═══ 10. TITLEBAR UTILITIES — chip strip (/stats poll every 5 s) ═══
 // No cron — user removed. 5s poll on sysstats.
 // Helpers for chip rendering
 function chip(label, value, accent) {
@@ -967,12 +976,12 @@ function chip(label, value, accent) {
       gap: '3px',
       padding: '1px 5px',
       borderRadius: '3px',
-      border: `1px solid ${JV.edge}`,
+      border: `1px solid ${LARS_STYLE.edge}`,
       background: 'rgba(2,7,12,0.55)'
     },
     children: [
-      jsx('span', { style: { color: JV.dim }, children: label }),
-      jsx('span', { style: { color: JV.cyan, textShadow: `0 0 5px ${JV.cyan}` }, children: value })
+      jsx('span', { style: { color: LARS_STYLE.dim }, children: label }),
+      jsx('span', { style: { color: LARS_STYLE.cyan, textShadow: `0 0 5px ${LARS_STYLE.cyan}` }, children: value })
     ]
   })
 }
@@ -1015,9 +1024,9 @@ function TitlebarUtils() {
       alignItems: 'center',
       justifyContent: 'space-between',
       width: '100%',
-      fontFamily: JV.mono,
+      fontFamily: LARS_STYLE.narrow,
       fontSize: '9px',
-      color: JV.mut,
+      color: LARS_STYLE.mut,
       letterSpacing: '0.05em',
       whiteSpace: 'nowrap'
     },
@@ -1029,7 +1038,7 @@ function TitlebarUtils() {
       jsxs('div', {
         style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'nowrap' },
         children: [
-          jsx('span', { style: { color: JV.dim, fontSize: '9px', marginRight: '3px' }, children: 'Resources:' }),
+          jsx('span', { style: { color: LARS_STYLE.dim, fontSize: '9px', marginRight: '3px' }, children: 'Resources:' }),
           ...resourceChips
         ]
       })
@@ -1037,6 +1046,7 @@ function TitlebarUtils() {
   })
 }
 
+// ═══ 11. DIV PAGES — shared page chrome (LarsPage) ═══
 // ── Shared page chrome ───────────────────────────────────────────────────────
 // Atoms are created ONCE in register() and passed in — never inside the
 // component (a fresh atom per render would reset state on every keystroke).
@@ -1065,7 +1075,11 @@ function LarsPage({ collapsedAtom, expandedAtom, posAtom, panelAtom, stateAtom, 
         // Thin per-Div glow (2 of 4 edges), kept on the collapsed chip.
         boxShadow: `2px 3px 4px 0 ${d.edge}99`,
         background: 'transparent',
-        color: d.path === activePath ? 'var(--ui-text-primary)' : 'var(--ui-text-secondary)',
+        // Utility-chip recipe: cyan text + soft glow; active Div = full glow
+        fontFamily: LARS_STYLE.disp,
+        color: LARS_STYLE.cyan,
+        textShadow: `0 0 5px ${LARS_STYLE.cyan}`,
+        opacity: d.path === activePath ? 1 : 0.65,
         cursor: 'pointer'
       },
       children: collapsed ? d.num : d.label
@@ -1086,7 +1100,10 @@ function LarsPage({ collapsedAtom, expandedAtom, posAtom, panelAtom, stateAtom, 
         borderRadius: '6px',
         border: `1px solid ${div.edge}66`,
         background: 'rgba(2,7,12,0.5)',
-        color: 'var(--ui-text-primary)',
+        // LARS_STYLE scheme: display font + Utility-cyan glowing label
+        fontFamily: LARS_STYLE.disp,
+        color: LARS_STYLE.cyan,
+        textShadow: `0 0 5px ${LARS_STYLE.cyan}`,
         textAlign: 'left',
         padding: '6px 8px',
         fontSize: '11px',
@@ -1123,12 +1140,7 @@ function LarsPage({ collapsedAtom, expandedAtom, posAtom, panelAtom, stateAtom, 
       gap: '2px',
       paddingBottom: '4px'
     },
-    children: [
-      jsx('img', { src: LOGO_DATA, alt: 'Lars', style: { height: '44px', width: 'auto', objectFit: 'contain' } }),
-      collapsed
-        ? null
-        : jsx('div', { style: { fontSize: '13px', fontWeight: '700', color: 'var(--ui-text-primary)', letterSpacing: '0.08em' }, children: 'Lars' })
-    ]
+    children: [LogoMark(false)]
   })
 
   // Voice/mic module: floats on EVERY custom page (fixed overlay, persists
@@ -1141,10 +1153,7 @@ function LarsPage({ collapsedAtom, expandedAtom, posAtom, panelAtom, stateAtom, 
     const titlebarChrome = isHome
       ? jsxs('div', { key: 'titlebar', children: [
           jsx(Contribute, { area: TITLEBAR_AREAS.left, id: 'lars:titlebar-brand', children:
-            jsx('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' }, children: [
-              jsx('img', { src: LOGO_DATA, alt: 'Lars', style: { height: '30px', width: 'auto', objectFit: 'contain' } }),
-              jsx('span', { style: { fontSize: '13px', fontWeight: '700', color: 'var(--ui-text-primary)', letterSpacing: '0.08em' }, children: 'Lars' })
-            ]})
+            jsx('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' }, children: [LogoMark(true)] })
           }),
           jsx(Contribute, { area: TITLEBAR_AREAS.right, id: 'lars:titlebar-utils', children: jsx(TitlebarUtils, {}) })
         ]})
@@ -1223,6 +1232,7 @@ function LarsPage({ collapsedAtom, expandedAtom, posAtom, panelAtom, stateAtom, 
   })
 }
 
+// ═══ 12. PLUGIN EXPORT — registration manifest ═══
 // ── Plugin ───────────────────────────────────────────────────────────────────
 export default {
   id: ID,
