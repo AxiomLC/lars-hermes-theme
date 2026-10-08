@@ -791,9 +791,10 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
       // core. DRAG HANDLE. State glow rides on the orb, not the box.
       jsxs('div', { ...orbDrag, style: { ...orbDrag.style, position: 'relative', display: 'inline-flex' }, children: [
         jsxs('svg', {
-          width: '104',
-          height: '104',
-          viewBox: '0 0 48 48',
+          id: 'ljOrb',
+          width: '112',
+          height: '112',
+          viewBox: '-4 -4 56 56',
           style: { filter: glow },
           children: [
             jsx('defs', {
@@ -814,25 +815,30 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
                 })
               ]
             }),
-            // 24-tick outer dial (major every 3rd, brighter)
+            // 24-tick outer dial, INSIDE the base ring: majors (every 3rd) =
+            // long clock lines, minors = short dot-ticks; both stop a small
+            // space short of the ring (r=20.6 → tick outer end r=20.0)
             jsx('g', {
-              children: Array.from({ length: 24 }, (_, i) =>
-                jsx('line', {
-                  x1: (24 + Math.cos((i / 24) * Math.PI * 2) * 23.0).toFixed(2),
-                  y1: (24 + Math.sin((i / 24) * Math.PI * 2) * 23.0).toFixed(2),
-                  x2: (24 + Math.cos((i / 24) * Math.PI * 2) * 24.0).toFixed(2),
-                  y2: (24 + Math.sin((i / 24) * Math.PI * 2) * 24.0).toFixed(2),
-                  stroke: i % 3 === 0 ? '#8b1f2b' : JV.cyan,
-                  strokeOpacity: i % 3 === 0 ? '0.75' : '0.25',
-                  strokeWidth: '1'
-                }, 't' + i))
+              children: Array.from({ length: 24 }, (_, i) => {
+                const a = (i / 24) * Math.PI * 2
+                const major = i % 3 === 0
+                return jsx('line', {
+                  x1: (24 + Math.cos(a) * (major ? 17.0 : 19.0)).toFixed(2),
+                  y1: (24 + Math.sin(a) * (major ? 17.0 : 19.0)).toFixed(2),
+                  x2: (24 + Math.cos(a) * 20.0).toFixed(2),
+                  y2: (24 + Math.sin(a) * 20.0).toFixed(2),
+                  stroke: JV.cyan,
+                  strokeOpacity: major ? '0.7' : '0.25',
+                  strokeWidth: major ? '1' : '0.6'
+                }, 't' + i)
+              })
             }),
-            // faint solid base ring (outermost; gap to compass ticks ~2.4)
+            // faint solid base ring (outermost)
             jsx('circle', {
               cx: '24', cy: '24', r: '20.6',
               fill: 'none', stroke: JV.cyan, strokeOpacity: '0.14', strokeWidth: '1.4'
             }),
-            // dashed slow rings (counter-rotating)
+            // dashed slow rings (counter-rotating) — the "orbiting dots"
             jsx('circle', {
               cx: '24', cy: '24', r: '19',
               fill: 'none', stroke: JV.cyan, strokeOpacity: '0.35', strokeWidth: '0.7',
@@ -846,7 +852,7 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
               style: { transformOrigin: '24px 24px', animation: 'ljReverse 30s linear infinite' }
             }),
             // comet arcs — 3 lengths/thicknesses, bright cyan/teal (Utility-text color)
-            // biggest comet arc — heavily ghosted (70% quieter than before)
+            // biggest arc ghosted
             jsx('circle', {
               cx: '24', cy: '24', r: '21',
               fill: 'none', stroke: 'rgba(64,200,255,0.37)', strokeWidth: '1.6',
@@ -870,9 +876,10 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
             // Opacity 0 idle — driven live by the pulse loop below.
             jsx('circle', { id: 'ljHaloU', cx: '24', cy: '24', r: '15', fill: 'url(#ljCoreGg)', opacity: '0' }),
             jsx('circle', { id: 'ljHaloL', cx: '24', cy: '24', r: '15', fill: 'url(#ljCoreGv)', opacity: '0' }),
-            // hollow core ring (no solid disc, no idle pulse)
-            jsx('circle', { id: 'ljCore', cx: '24', cy: '24', r: '5.4',
-              fill: 'none', stroke: JV.cyan, strokeOpacity: '0.25', strokeWidth: '0.45' })
+            // solid core disc — JV.cyan @ same transparency as the outermost
+            // ring (0.14), pulsing via scale; +30% (5.4 → 7.0)
+            jsx('circle', { id: 'ljCore', cx: '24', cy: '24', r: '7.0',
+              fill: JV.cyan, fillOpacity: '0.14' })
           ]
         }),
         jsx('div', {
