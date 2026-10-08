@@ -54,12 +54,14 @@ No external CSS-in-JS library, no separate stylesheet files, no `window.require`
 The voice module (`JarvisMic` in `plugin.js`) renders a donor-style reactor orb
 —all inline SVG, ~104px, drag handle, no npm/Canvas deps:
 
-- **Layers (out → in)**: `r=21` dashed comet arcs (3 speeds/directions — cyan
-  ghosted, the 12 s one is deliberately near-invisible; it is the pulse
-  surrogate) → `r=20.6` faint solid base ring → **24-tick compass dial at
-  r=23–24 (`23.0–24.0`), every 3rd tick dark red/black `#8b1f2b`, rest cyan**
-  → dashed slow rings at r=19 / r=15 → **hollow core ring `#ljCore` at r=5.4,
-  stroke-width 0.45, cyan @ 0.25 opacity** (NO solid disc, NO idle pulse).
+- **Layers (out → in)**: **compass dial OUTSIDE the base ring — majors every
+  3rd are long clock lines (r=23→26, 3× dot length), minors are dot-ticks
+  (r=23→24); slight space from ring** → `r=20.6` faint solid base ring (ticking
+  inside ring by design of ver 1.1) → dashed comet arcs at r=21/18/16
+  (cyan-teal 64,200,255, opacities 0.37/0.42/0.45) → dashed slow rings at
+  r=19 / r=15 → **hollow core ring → replaced in ver 1.1: SOLID core disc
+  `#ljCore` at r=7.0, cyan fill @ 0.14 (same transparency as base ring),
+  pulsing via scale — NO idle pulse**.
 - **Audio-reactive halos** (`ljHaloU`/`ljHaloL`, r=15 = the first dot-ring):
   radial gradients — **green for the user, violet for Lars** — opacity 0 when
   idle. Driven every 60 ms by a **window-level `setInterval`** in `JarvisMic`
