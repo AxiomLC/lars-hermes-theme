@@ -815,24 +815,6 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
                 })
               ]
             }),
-            // 24-tick outer dial, INSIDE the base ring: majors (every 3rd) =
-            // long clock lines, minors = short dot-ticks; both stop a small
-            // space short of the ring (r=20.6 → tick outer end r=20.0)
-            jsx('g', {
-              children: Array.from({ length: 24 }, (_, i) => {
-                const a = (i / 24) * Math.PI * 2
-                const major = i % 3 === 0
-                return jsx('line', {
-                  x1: (24 + Math.cos(a) * (major ? 17.0 : 19.0)).toFixed(2),
-                  y1: (24 + Math.sin(a) * (major ? 17.0 : 19.0)).toFixed(2),
-                  x2: (24 + Math.cos(a) * 20.0).toFixed(2),
-                  y2: (24 + Math.sin(a) * 20.0).toFixed(2),
-                  stroke: JV.cyan,
-                  strokeOpacity: major ? '0.7' : '0.25',
-                  strokeWidth: major ? '1' : '0.6'
-                }, 't' + i)
-              })
-            }),
             // faint solid base ring (outermost)
             jsx('circle', {
               cx: '24', cy: '24', r: '20.6',
@@ -870,6 +852,24 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
               fill: 'none', stroke: 'rgba(64,200,255,0.45)', strokeWidth: '0.8',
               strokeLinecap: 'round', strokeDasharray: '6 95',
               style: { transformOrigin: '24px 24px', animation: 'ljSpin 17s linear infinite' }
+            }),
+            // 24-tick outer dial, OUTSIDE the base ring: majors (every 3rd) =
+            // long clock/compass lines (23→26, 3× dot length), minors = dot-ticks
+            // (23→24). Canvas has headroom (viewBox -4 -4 56 56).
+            jsx('g', {
+              children: Array.from({ length: 24 }, (_, i) => {
+                const a = (i / 24) * Math.PI * 2
+                const major = i % 3 === 0
+                return jsx('line', {
+                  x1: (24 + Math.cos(a) * 23.0).toFixed(2),
+                  y1: (24 + Math.sin(a) * 23.0).toFixed(2),
+                  x2: (24 + Math.cos(a) * (major ? 26.0 : 24.0)).toFixed(2),
+                  y2: (24 + Math.sin(a) * (major ? 26.0 : 24.0)).toFixed(2),
+                  stroke: JV.cyan,
+                  strokeOpacity: major ? '0.7' : '0.25',
+                  strokeWidth: major ? '1' : '0.6'
+                }, 't' + i)
+              })
             }),
             // state halos: green (user) / violet (Lars) — start AT the core ring
             // (r≈5.5) and fade out to the first orbiting dot-ring (r=15).
