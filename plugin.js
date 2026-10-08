@@ -815,20 +815,22 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
                 })
               ]
             }),
-            // faint solid base ring (outermost)
+            // faint solid base ring (outermost) — 2× thickness (1.4 → 2.8)
             jsx('circle', {
               cx: '24', cy: '24', r: '20.6',
-              fill: 'none', stroke: JV.cyan, strokeOpacity: '0.14', strokeWidth: '1.4'
+              fill: 'none', stroke: JV.cyan, strokeOpacity: '0.14', strokeWidth: '2.8'
             }),
-            // dashed slow rings (counter-rotating) — the "orbiting dots"
+            // dashed slow rings (counter-rotating) — the "orbiting dots".
+            // Gap from the base ring tripled: 19 → 15.8 (gap 20.6→4.8 ... kept
+            // separation between the two dash rings: 15.8 / 12.6)
             jsx('circle', {
-              cx: '24', cy: '24', r: '19',
+              cx: '24', cy: '24', r: '15.8',
               fill: 'none', stroke: JV.cyan, strokeOpacity: '0.35', strokeWidth: '0.7',
               strokeDasharray: '2 10',
               style: { transformOrigin: '24px 24px', animation: 'ljSpin 42s linear infinite' }
             }),
             jsx('circle', {
-              cx: '24', cy: '24', r: '15',
+              cx: '24', cy: '24', r: '12.6',
               fill: 'none', stroke: JV.cyan, strokeOpacity: '0.3', strokeWidth: '0.6',
               strokeDasharray: '1 8',
               style: { transformOrigin: '24px 24px', animation: 'ljReverse 30s linear infinite' }
@@ -853,29 +855,27 @@ function JarvisMic({ posAtom, panelAtom, stateAtom, voiceLink, transcriptAtom })
               strokeLinecap: 'round', strokeDasharray: '6 95',
               style: { transformOrigin: '24px 24px', animation: 'ljSpin 17s linear infinite' }
             }),
-            // 24-tick outer dial, OUTSIDE the base ring: majors (every 3rd) =
-            // long clock/compass lines (23→26, 3× dot length), minors = dot-ticks
-            // (23→24). Canvas has headroom (viewBox -4 -4 56 56).
+            // radiator fan: 70 hairline lines on the inside edge of the outer
+            // ring band, pointing inward — tips stop at the inner of the two
+            // dashed orbits BEFORE the deepest one (tips at r≈16.2), so the
+            // dash ring at 15.8 rides at the teeth's edge and the deeper
+            // orbits stay clear. Same transparency as the ring (0.14).
             jsx('g', {
-              children: Array.from({ length: 24 }, (_, i) => {
-                const a = (i / 24) * Math.PI * 2
-                const major = i % 3 === 0
-                return jsx('line', {
-                  x1: (24 + Math.cos(a) * 23.0).toFixed(2),
-                  y1: (24 + Math.sin(a) * 23.0).toFixed(2),
-                  x2: (24 + Math.cos(a) * (major ? 26.0 : 24.0)).toFixed(2),
-                  y2: (24 + Math.sin(a) * (major ? 26.0 : 24.0)).toFixed(2),
-                  stroke: JV.cyan,
-                  strokeOpacity: major ? '0.7' : '0.25',
-                  strokeWidth: major ? '1' : '0.6'
-                }, 't' + i)
-              })
+              opacity: '0.14',
+              children: Array.from({ length: 70 }, (_, i) =>
+                jsx('line', {
+                  x1: (24 + Math.cos((i / 70) * Math.PI * 2) * 20.2).toFixed(2),
+                  y1: (24 + Math.sin((i / 70) * Math.PI * 2) * 20.2).toFixed(2),
+                  x2: (24 + Math.cos((i / 70) * Math.PI * 2) * 16.2).toFixed(2),
+                  y2: (24 + Math.sin((i / 70) * Math.PI * 2) * 16.2).toFixed(2),
+                  stroke: JV.cyan, strokeWidth: '0.35'
+                }, 'f' + i))
             }),
             // state halos: green (user) / violet (Lars) — start AT the core ring
-            // (r≈5.5) and fade out to the first orbiting dot-ring (r=15).
+            // and fade out to the first orbiting dot-ring (r=12.6).
             // Opacity 0 idle — driven live by the pulse loop below.
-            jsx('circle', { id: 'ljHaloU', cx: '24', cy: '24', r: '15', fill: 'url(#ljCoreGg)', opacity: '0' }),
-            jsx('circle', { id: 'ljHaloL', cx: '24', cy: '24', r: '15', fill: 'url(#ljCoreGv)', opacity: '0' }),
+            jsx('circle', { id: 'ljHaloU', cx: '24', cy: '24', r: '12.6', fill: 'url(#ljCoreGg)', opacity: '0' }),
+            jsx('circle', { id: 'ljHaloL', cx: '24', cy: '24', r: '12.6', fill: 'url(#ljCoreGv)', opacity: '0' }),
             // solid core disc — JV.cyan @ same transparency as the outermost
             // ring (0.14), pulsing via scale; +30% (5.4 → 7.0)
             jsx('circle', { id: 'ljCore', cx: '24', cy: '24', r: '7.0',
